@@ -12,10 +12,8 @@ import numpy as np
 
 from . import Exporter, register
 from ..config_manager import _vr_dummy
-from ..io_handlers import (ExportError, export_folder_names,
-                           exported_number_text,
-                           format_study_date, LOSS_SCOPE_STANDARD,
-                           select_patient_ids, unmatched_patient_ids_sentence)
+from ..io_handlers import (export_folder_names, exported_number_text,
+                           format_study_date, LOSS_SCOPE_STANDARD)
 from ..entities import exported_patient_id
 from ..logger import describe_exception_without_paths, get_logger
 from ..waveform import Waveform, WaveformChannel
@@ -575,206 +573,115 @@ class WfdbExporter(Exporter):
                 f"{', '.join(repr(name) for name in unknown)}; the wfdb "
                 f"options are "
                 f"{', '.join(repr(name) for name in sorted(_WFDB_OPTIONS))}.")
-        # Straight after the unknown-option refusal above and before any
-        # file is written, for the same reason: a refusal raised later
-        # arrives with records already on disk. `select_patient_ids` is the
-        # one reading of this option, shared with
-        # `DicomSession._export_dicom` and `get_cohort_report` -- see
-        # `io_handlers.normalize_id_filter` for what it refuses.
-        #
-        # `store_backend` is read first so the count below can write its
-        # row, and is passed down to `_write_instance` explicitly rather
-        # than read off `session` there, so the one place that writes an
-        # audit entry names its dependency instead of reaching back
-        # through the facade. `None` is a legitimate value:
-        # `_write_instance` is called directly by tests with no session
-        # behind it.
-        store_backend = getattr(session, "store_backend", None)
-        selection = select_patient_ids(options.get("patient_ids"),
-                                       session.store.patients)
-        patient_ids = selection.ids
-        # Straight after the selection: nothing can refuse between here and
-        # the walk, so the export this row describes is certain to run.
-        # Counted and never named, one row per export; `WARNING`, so a
-        # short export grades `REVIEW_REQUIRED` rather than PASS.
-        if selection.unmatched:
-            sentence = unmatched_patient_ids_sentence(selection)
-            logger.warning(sentence)
-            if store_backend is not None:
-                store_backend.log_audit(
-                    action_type="WARNING", entity_uid=folder,
-                    details=f"WFDB export to {folder}: {sentence}")
-        # Off by default: (0070,0006) is free-text clinical commentary, and
-        # a site-defined Concept Name's Code Meaning is operator-typed too.
-        # This is the auditor's override, not a debug switch -- it says the
-        # protocol permits releasing that text.
-        include_annotation_text = bool(options.get("include_annotation_text", False))
+        # Every gate the two formats share -- the reading of `patient_ids`
+        # and its unmatched-ID row, the save, the stale-policy notice, the
+        # `EXPORT` row and `ExportError` -- runs once, in
+        # `Session._export_pipeline` (#783). Each option is read here by
+        # its literal name: `tests/test_wfdb_privacy.py` pins the set read
+        # against the page that freezes it.
+        return session._export_pipeline(
+            "wfdb", folder, patient_ids=options.get("patient_ids"),
+            format_options={"include_annotation_text": bool(
+                options.get("include_annotation_text", False))})
 
-        # Save before the walk, as `_export_dicom` does (#809):
-        # `export()` is documented to save the session before it writes,
-        # and a WFDB export that did not left `anonymize()`'s edits only
-        # in memory, so the store reopened on the source values. After
-        # both refusals above and never before them: a refused export
-        # must not have moved the store. `sync=True` for the reason the
-        # comment above `_export_dicom`'s own `save(sync=True)` gives (a
-        # plain `save()` returns before the flush and races the walk).
-        # `getattr`, because a caller may hand in a session-like object
-        # with no `save`, as `report_policies` below allows; and only with
-        # a store behind the session, because `save()` writes to
-        # `store_backend` and `None` is a legitimate value here (see the
-        # comment on `store_backend` above).
-        save = getattr(session, "save", None)
-        if save is not None and store_backend is not None:
-            save(sync=True)
+    def _write_records(self, folder, walk, include_annotation_text,
+                       store_backend):
+        """Write one record per waveform instance in `walk`, in walk order.
 
-        # The notice for statuses recorded under another policy, over the
-        # instances this export will attempt: the ones in the selected
-        # patients that hold a waveform. A CT slice
-        # sharing a series with an ECG is written nowhere, so its status is
-        # not this export's to report (`_write_instance`'s first arm).
-        # After the option checks above, so a refused call says nothing;
-        # through `getattr` because a caller may hand in a session-like
-        # object that is not a `Session`.
-        report_policies = getattr(
-            session, "_report_statuses_under_another_policy", None)
-        if report_policies is not None:
-            report_policies(
-                [(patient, study, instance)
-                 for patient in session.store.patients
-                 if patient_ids is None or patient.patient_id in patient_ids
-                 for study in patient.studies
-                 for series in study.series
-                 for instance in series.instances
-                 if getattr(instance.sequences.get(WAVEFORM_SEQUENCE_TAG),
-                            "items", None)],
-                folder, "WFDB")
+        Each instance that raises is caught, logged and audited (`ERROR`),
+        and the walk continues. An instance with no waveform writes
+        nothing. Called by `Session._export_pipeline`, which writes the
+        `EXPORT` row and raises `ExportError` from what this returns.
+
+        Args:
+            folder (str): The export root.
+            walk (list): `(patient, study, series, instance)` per instance,
+                in walk order.
+            include_annotation_text (bool): Passed to `_write_instance`.
+            store_backend: The store the rows go to, or None to write none.
+
+        Returns:
+            tuple: `(written, failures)`: the `.hea` paths written, and
+            `(uid, detail)` per instance that failed.
+        """
+        logger = get_logger()
         written = []
-        failed = 0
         # `(uid, detail)` per failed record, the shape `ExportError`
-        # carries. `failed` alone could say that nothing was
-        # delivered but not which records, which is all a caller who
-        # catches the exception can act on.
+        # carries. A count alone could say that nothing was delivered but
+        # not which records, which is all a caller who catches the
+        # exception can act on.
         failures = []
         used_names = {}  # out_dir -> set of record names already claimed
 
-        for patient in session.store.patients:
-            # `is not None`, never a truthiness test: an empty container
-            # is a filter that selected nobody, and a truthiness test
-            # would read it as no filter and write the whole cohort. The
-            # siblings that answer the same question are spelled the same
-            # way: `_export_dicom`, `Session.get_cohort_report`, and
-            # `SqliteStore._iter_flattened_instances`.
-            if patient_ids is not None and patient.patient_id not in patient_ids:
+        for patient, study, series, instance in walk:
+            # Contain per-instance failures the way
+            # `DicomExporter._export_instance_worker` does
+            # (io_handlers.py): catch, log, continue. Without
+            # this, one malformed instance out of hundreds
+            # raises out of `session.export()` and aborts the
+            # whole run, leaving every later patient silently
+            # unexported with no indication on disk that the
+            # run was partial.
+            #
+            # Containment is only half the pattern: like the
+            # DICOM path (`DicomExporter._report_export_failures`),
+            # each failure also records an `ERROR` audit row,
+            # so `get_audit_errors()` and the report see it and
+            # the run does not grade PASS. A returned list one
+            # entry short is not a channel: nothing compares
+            # its length against the graph.
+            try:
+                path = self._write_instance(
+                    folder, patient, study, series, instance, logger,
+                    used_names, include_annotation_text,
+                    store_backend)
+            except Exception as e:
+                # Fall back the way `_report_export_failures`
+                # does. `sop_instance_uid` may be `None`, and
+                # sqlite stores that without complaint -- a
+                # row nobody can look up is barely better
+                # than no row.
+                uid = instance.sop_instance_uid or "UNKNOWN"
+                # Never `{e}`: an OSError's text ends in the
+                # path it failed on, and a record path carries
+                # the Patient ID into a persisted row and the
+                # report. The type leads, as every other
+                # recorded reason does.
+                detail = (f"WFDB export failed for instance "
+                          f"{uid}: "
+                          f"{describe_exception_without_paths(e)}")
+                # Flattened and pipe-escaped before it is
+                # recorded, as `io_handlers.py` does for the
+                # same reason: an arbitrary exception's
+                # `str()` can carry newlines and pipes, and
+                # this renders straight into a markdown table
+                # row in the compliance report. The
+                # neighbouring `DATA_LOSS` site does not
+                # flatten because it composes its own
+                # single-line detail; this one cannot know
+                # what it is holding.
+                detail = " ".join(detail.split()).replace(
+                    "|", "\\|")
+                failures.append((uid, detail))
+                logger.error(detail)
+                if store_backend is not None:
+                    # `log_audit`, never `log_audit_batch` --
+                    # the reason is at
+                    # `DicomExporter._report_export_losses`:
+                    # the batch method writes straight to the
+                    # database while the audit writer thread
+                    # is live and swallows `sqlite3.Error`
+                    # into a log line, so contention would
+                    # lose the very entry that exists because
+                    # a log line was not enough.
+                    store_backend.log_audit(
+                        action_type="ERROR", entity_uid=uid,
+                        details=detail)
                 continue
-
-            for study in patient.studies:
-                for series in study.series:
-                    for instance in series.instances:
-                        # Contain per-instance failures the way
-                        # `DicomExporter._export_instance_worker` does
-                        # (io_handlers.py): catch, log, continue. Without
-                        # this, one malformed instance out of hundreds
-                        # raises out of `session.export()` and aborts the
-                        # whole run, leaving every later patient silently
-                        # unexported with no indication on disk that the
-                        # run was partial.
-                        #
-                        # Containment is only half the pattern: like the
-                        # DICOM path (`DicomExporter._report_export_failures`),
-                        # each failure also records an `ERROR` audit row,
-                        # so `get_audit_errors()` and the report see it and
-                        # the run does not grade PASS. A returned list one
-                        # entry short is not a channel: nothing compares
-                        # its length against the graph.
-                        try:
-                            path = self._write_instance(
-                                folder, patient, study, series, instance, logger,
-                                used_names, include_annotation_text,
-                                store_backend)
-                        except Exception as e:
-                            failed += 1
-                            # Fall back the way `_report_export_failures`
-                            # does. `sop_instance_uid` may be `None`, and
-                            # sqlite stores that without complaint -- a
-                            # row nobody can look up is barely better
-                            # than no row.
-                            uid = instance.sop_instance_uid or "UNKNOWN"
-                            # Never `{e}`: an OSError's text ends in the
-                            # path it failed on, and a record path carries
-                            # the Patient ID into a persisted row and the
-                            # report. The type leads, as every other
-                            # recorded reason does.
-                            detail = (f"WFDB export failed for instance "
-                                      f"{uid}: "
-                                      f"{describe_exception_without_paths(e)}")
-                            # Flattened and pipe-escaped before it is
-                            # recorded, as `io_handlers.py` does for the
-                            # same reason: an arbitrary exception's
-                            # `str()` can carry newlines and pipes, and
-                            # this renders straight into a markdown table
-                            # row in the compliance report. The
-                            # neighbouring `DATA_LOSS` site does not
-                            # flatten because it composes its own
-                            # single-line detail; this one cannot know
-                            # what it is holding.
-                            detail = " ".join(detail.split()).replace(
-                                "|", "\\|")
-                            failures.append((uid, detail))
-                            logger.error(detail)
-                            if store_backend is not None:
-                                # `log_audit`, never `log_audit_batch` --
-                                # the reason is at
-                                # `DicomExporter._report_export_losses`:
-                                # the batch method writes straight to the
-                                # database while the audit writer thread
-                                # is live and swallows `sqlite3.Error`
-                                # into a log line, so contention would
-                                # lose the very entry that exists because
-                                # a log line was not enough.
-                                store_backend.log_audit(
-                                    action_type="ERROR", entity_uid=uid,
-                                    details=detail)
-                            continue
-                        if path:
-                            written.append(path)
-
+            if path:
+                written.append(path)
         logger.info(f"WFDB export complete. {len(written)} records written.")
-        # Every export run writes one EXPORT row, whatever the
-        # format: `generate_report` keys its export boundary on the
-        # row's absence, so a format that skipped it would tell
-        # its users their finished export never happened.
-        #
-        # It names the failure count as well as the written one.
-        # "wrote 8 records" cannot be read as "8 of 10" or as "8 of 8",
-        # and the whole-run question is the one a reader asks first --
-        # the per-instance rows above answer *which*, this answers
-        # *whether*. It is stated on every run, including a clean one,
-        # so `0 instances failed` is a fact rather than an absence.
-        if store_backend is not None:
-            store_backend.log_audit(
-                action_type="EXPORT",
-                entity_uid=folder,
-                details=(f"WFDB export to {folder}: wrote {len(written)} "
-                         f"{'record' if len(written) == 1 else 'records'}, "
-                         f"{failed} "
-                         f"{'instance' if failed == 1 else 'instances'} "
-                         f"failed."))
-        # Last, after every ERROR row and the EXPORT row, for the reason
-        # `_export_dicom` raises there: a caller who catches this still
-        # holds a complete audit trail and a report grading
-        # REVIEW_REQUIRED.
-        #
-        # `failed and not written`, never `not written` alone: a store
-        # with no waveform instances, or waveforms with no samples (a
-        # skip with its own STANDARD row), attempted nothing and
-        # `[]` is the truth about it. Never `failed` alone either: a
-        # partial export is a real result, and raising would discard the
-        # list naming what did reach disk. And not guarded on
-        # `store_backend`: the exception is the caller's channel, not
-        # the store's, so a session-less caller is owed it too.
-        if failed and not written:
-            raise ExportError(failures, failed, folder)
-        return written
+        return written, failures
 
     @staticmethod
     def _unique_record_name(base_name, out_dir, used_names):

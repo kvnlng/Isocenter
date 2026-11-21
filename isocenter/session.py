@@ -673,7 +673,8 @@ def _audit_unread_instances(store_backend, operation, failures):
                                 entity_uid=uid or "UNKNOWN", details=detail)
 
 
-def _audit_withheld_instances(store_backend, folder, withheld):
+def _audit_withheld_instances(store_backend, folder, withheld,
+                              label="DICOM"):
     """Write one `WARNING` audit row per instance the pre-export scan withheld.
 
     Each row names the instance and the level of the hierarchy that carried the
@@ -685,6 +686,7 @@ def _audit_withheld_instances(store_backend, folder, withheld):
             rows.
         folder (str): The export's folder, for the row text.
         withheld (list): `(sop_instance_uid, level)` per withheld instance.
+        label (str): The format's word the row begins with.
     """
     # Without these rows `export(check_burned_in=True)` would simply plan
     # fewer entries, and a never-anonymized cohort could export to an empty
@@ -701,8 +703,10 @@ def _audit_withheld_instances(store_backend, folder, withheld):
     # call: the frozen-vocabulary pin reads the keyword at the site, and a
     # batch write swallows contention into a log line (see
     # `DicomExporter._report_export_losses`).
+    if store_backend is None:
+        return
     for uid, level in withheld:
-        detail = (f"DICOM export to {folder} withheld instance {uid}: its "
+        detail = (f"{label} export to {folder} withheld instance {uid}: its "
                   f"{level} still carries an identifier the pre-export scan "
                   f"raised (check_burned_in=True).")
         detail = " ".join(detail.split()).replace("|", "\\|")
@@ -1091,6 +1095,269 @@ def _why_excluded(options, patient, study, series, instance) -> Optional[str]:
                 return level
 
     return None
+
+
+@dataclasses.dataclass
+class _ExportRun:
+    """One export's plan, as its format built it (#783).
+
+    `tasks` is the format's own unit of work: an `ExportContext` per
+    instance for `dicom`, a `(patient, study, series, instance)` per
+    instance walked for `wfdb`. `withheld` and `gated` are as
+    `_build_export_plan` returns them.
+    """
+    tasks: list
+    patient_count: int = 0
+    withheld: list = dataclasses.field(default_factory=list)
+    gated: list = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class _FormatResult:
+    """What a format's write returned to `Session._export_pipeline` (#783).
+
+    `value` is what `export()` returns. `ran` says the write was attempted
+    (a DICOM batch ran; a WFDB walk had instances to walk). `failures` is
+    `(uid, detail)` per instance that failed, for a format whose `value`
+    does not carry them.
+    """
+    value: Any
+    ran: bool = False
+    failures: list = dataclasses.field(default_factory=list)
+
+
+class _DicomFormat:
+    """The `dicom` format's own part of an export (#783): the plan the
+    session builds, the batch, and the words of its rows.
+
+    Private, and not a plugin interface: `Session._export_pipeline` holds
+    every gate the formats share.
+    """
+    label = "DICOM"
+    #: The format writes pixels, so the `burned_in_text` policy applies.
+    writes_pixels = True
+    #: `_release_memory` after the save, before the walk loads pixels.
+    releases_memory = True
+    #: Each planned context names the file its instance goes to, so the
+    #: collision report and the disclosure read the plan.
+    files_by_plan = True
+
+    @staticmethod
+    def announce(folder):
+        get_logger().info("Exporting session to: %s", folder)
+        print("Preparing export plan...")
+        print("Saving pending changes to free memory...")
+
+    @staticmethod
+    def plan(session, options, target_ids):
+        tasks, patient_count, withheld, gated = session._build_export_plan(
+            options, target_ids)
+        return _ExportRun(tasks, patient_count, withheld, gated)
+
+    @staticmethod
+    def attempted(session, run):
+        # The plan holds instances; the notice reads their patient and
+        # study too.
+        if not run.tasks:
+            return []
+        planned = {id(task.instance) for task in run.tasks}
+        return [(patient, study, instance)
+                for patient in session.store.patients
+                for study in patient.studies
+                for series in study.series
+                for instance in series.instances
+                if id(instance) in planned]
+
+    @staticmethod
+    def write(session, folder, run, show_progress, format_options,
+              held_by_policy):
+        if not run.tasks and (run.withheld or held_by_policy):
+            requested = len(run.withheld) + held_by_policy
+            get_logger().warning(
+                "No instances exported: all %d were withheld by the %s.",
+                requested,
+                ("pre-export scan" if not held_by_policy else
+                 "burned_in_text policy" if not run.withheld else
+                 "pre-export scan and the burned_in_text policy"))
+            # Returned, not `ExportError`: nothing was attempted and
+            # nothing failed. The rows grade the run and the counters say
+            # none of it was written.
+            return _FormatResult(ExportSummary())
+        if not run.tasks:
+            get_logger().warning("No instances found to export.")
+            # Zero of zero, and deliberately not an `ExportError`: a
+            # plan that matched nothing is not an export that failed,
+            # and the `EXPORT` row says so. The caller still gets a
+            # summary rather than `None`, so `.written` and `.failures`
+            # are askable on every return path.
+            return _FormatResult(ExportSummary())
+        print(f"Exporting {len(run.tasks)} images from "
+              f"{run.patient_count} patients...")
+        summary = session._run_export_batch(run.tasks, show_progress,
+                                            session.store_backend)
+        return _FormatResult(summary, ran=True)
+
+    @staticmethod
+    def counters(run, result, held_by_policy):
+        if result.ran:
+            # Withheld instances were requested and not written, so they
+            # are in the denominator: the count answers for the cohort,
+            # not for the plan.
+            return (result.value.written,
+                    len(run.tasks) + len(run.withheld) + held_by_policy)
+        if run.withheld or held_by_policy:
+            # Counted, unlike a true empty plan: the caller asked for
+            # these instances and none was written, which is exactly what
+            # "0 of K requested" says.
+            return (0, len(run.withheld) + held_by_policy)
+        return None
+
+    @staticmethod
+    def export_row(folder, run, result, held_by_policy):
+        withheld = run.withheld
+        if not result.ran and (withheld or held_by_policy):
+            requested = len(withheld) + held_by_policy
+            if not held_by_policy:
+                # Byte for byte what it was before #1108.
+                return (f"DICOM export to {folder}: wrote 0 of "
+                        f"{len(withheld)} requested instances; all "
+                        f"{len(withheld)} were withheld by the pre-export "
+                        f"scan (check_burned_in=True).")
+            by = ([f"{len(withheld)} by the pre-export scan "
+                   f"(check_burned_in=True)"] if withheld else [])
+            by.append(f"{held_by_policy} by the burned_in_text policy")
+            return (f"DICOM export to {folder}: wrote 0 of {requested} "
+                    f"requested instances; all {requested} were "
+                    f"withheld, {' and '.join(by)}.")
+        if not result.ran:
+            # Still an export run, so it still writes its row: a subset
+            # that matched nothing is a fact about this run the audit
+            # trail has to carry, and the report's export boundary keys
+            # on the row's existence, not on files.
+            return (f"DICOM export to {folder}: wrote 0 of 0 planned "
+                    f"instances; nothing matched the export plan.")
+        # The withheld clause is appended only when something was
+        # withheld, so a run that withheld nothing writes the row
+        # without it, byte for byte.
+        withheld_clause = (f"; {len(withheld)} more withheld by the "
+                           f"pre-export scan (check_burned_in=True)"
+                           if withheld else "")
+        # The same for the `burned_in_text` gate (#1108): its own clause,
+        # so neither count is said in the other's words.
+        if held_by_policy:
+            withheld_clause += (f"; {held_by_policy} more withheld by the "
+                                f"burned_in_text policy")
+        return (f"DICOM export to {folder}: wrote {result.value.written} "
+                f"of {len(run.tasks)} planned instances from "
+                f"{run.patient_count} patients{withheld_clause}.")
+
+    @staticmethod
+    def finish(result):
+        if result.ran:
+            print("Done.")
+
+    @staticmethod
+    def error(folder, run, result):
+        # `written == 0 **and** failures`, never `written == 0` alone: an
+        # empty plan reaching here would otherwise raise, and zero of
+        # zero is not a failure. A *partial* export does not raise
+        # either -- two files out of three is a real result, and raising
+        # would discard the summary naming which two.
+        summary = result.value
+        if result.ran and summary.written == 0 and summary.failures:
+            return ExportError(summary.failures, len(run.tasks), folder)
+        return None
+
+
+class _WfdbFormat:
+    """The `wfdb` format's own part of an export (#783): the walk over the
+    selected patients, the records, and the words of its `EXPORT` row.
+
+    The records are written by `WfdbExporter._write_records`, in this
+    process and in walk order; `Session._export_pipeline` holds every gate
+    the formats share.
+    """
+    label = "WFDB"
+    writes_pixels = False
+    releases_memory = False
+    #: A record's name is decided as it is written
+    #: (`WfdbExporter._unique_record_name`), so no plan names a file.
+    files_by_plan = False
+
+    @staticmethod
+    def announce(folder):
+        pass
+
+    @staticmethod
+    def plan(session, options, target_ids):
+        # Every instance of every selected patient, in walk order, as the
+        # walk always took them: one that holds no waveform is written
+        # nowhere and files nothing (`_write_instance`'s first arm).
+        return _ExportRun([
+            (patient, study, series, instance)
+            for patient in session.store.patients
+            if patient.patient_id in target_ids
+            for study in patient.studies
+            for series in study.series
+            for instance in series.instances])
+
+    @staticmethod
+    def attempted(session, run):
+        from .exporters.wfdb import WAVEFORM_SEQUENCE_TAG
+        return [(patient, study, instance)
+                for patient, study, _series, instance in run.tasks
+                if getattr(instance.sequences.get(WAVEFORM_SEQUENCE_TAG),
+                           "items", None)]
+
+    @staticmethod
+    def write(session, folder, run, show_progress, format_options,
+              held_by_policy):
+        from .exporters.wfdb import WfdbExporter
+        written, failures = WfdbExporter()._write_records(
+            folder, run.tasks,
+            bool(format_options.get("include_annotation_text", False)),
+            session.store_backend)
+        return _FormatResult(written, ran=bool(run.tasks), failures=failures)
+
+    @staticmethod
+    def counters(run, result, held_by_policy):
+        return None
+
+    @staticmethod
+    def export_row(folder, run, result, held_by_policy):
+        # It names the failure count as well as the written one.
+        # "wrote 8 records" cannot be read as "8 of 10" or as "8 of 8",
+        # and the whole-run question is the one a reader asks first --
+        # the per-instance rows answer *which*, this answers *whether*. It
+        # is stated on every run, including a clean one, so `0 instances
+        # failed` is a fact rather than an absence.
+        written, failed = len(result.value), len(result.failures)
+        return (f"WFDB export to {folder}: wrote {written} "
+                f"{'record' if written == 1 else 'records'}, "
+                f"{failed} "
+                f"{'instance' if failed == 1 else 'instances'} "
+                f"failed.")
+
+    @staticmethod
+    def finish(result):
+        pass
+
+    @staticmethod
+    def error(folder, run, result):
+        # `failed and not written`, never `not written` alone: a store
+        # with no waveform instances, or waveforms with no samples (a
+        # skip with its own STANDARD row), attempted nothing and `[]` is
+        # the truth about it. Never `failed` alone either: a partial
+        # export is a real result, and raising would discard the list
+        # naming what did reach disk.
+        if result.failures and not result.value:
+            return ExportError(result.failures, len(result.failures), folder)
+        return None
+
+
+#: The formats `Session._export_pipeline` runs, by the key each door
+#: passes. Private: a plugin is not one of these.
+_EXPORT_FORMATS = {"dicom": _DicomFormat, "wfdb": _WfdbFormat}
 
 
 def _uid_path(patient, study, series, instance) -> Tuple[str, str, str, str]:
@@ -8130,8 +8397,8 @@ class DicomSession:
         OCR. It loads each frame once to check that the record names the
         pixels that the instance holds now. With `check_burned_in=True`, it
         reads with the policy's reader the pixels that it is about to write
-        instead (see
-        `_export_dicom`). These rules apply to an instance that holds
+        instead (see `check_burned_in` under "DICOM export options" on the
+        Session API page). These rules apply to an instance that holds
         pixels:
 
         - If it was never checked under the policy's threshold and zones,
@@ -8246,13 +8513,12 @@ class DicomSession:
         # "nothing was written" and a stale pair answers for the wrong
         # export.
         #
-        # Here and not in `_export_dicom`: a call that
-        # raises before any exporter runs (an unknown format), inside one
-        # (an option it does not take), or that goes through an exporter
-        # which does not report delivery (`wfdb`) answers nothing about
-        # DICOM delivery either, and must not leave the last DICOM
-        # export's pair answering for it. `_export_dicom` is private; a
-        # caller reaching it directly bypasses this and inherits the pair.
+        # Here and not in `_export_pipeline`: a call that
+        # raises before any exporter runs (an unknown format), or inside
+        # one (an option it does not take), answers nothing about delivery
+        # either, and must not leave the last export's pair answering for
+        # it. `_export_dicom` and `_export_pipeline` are private; a caller
+        # reaching either directly bypasses this and inherits the pair.
         self._last_export_written = None
         self._last_export_requested = None
 
@@ -8472,16 +8738,79 @@ class DicomSession:
                 audit rows and the `EXPORT` row are written. A partial
                 export and an empty plan return a summary instead.
         """
+        # Python's binding of this signature is the DICOM unknown-option
+        # refusal, raised before any line below runs, and the signature is
+        # the one place the DICOM option names and defaults are spelled:
+        # `tests/test_frozen_surface.py` and
+        # `tests/test_documented_api_exists.py` both read it. Every gate the
+        # formats share runs in `_export_pipeline` (#783); what is left
+        # here is the split between the session's options and the
+        # format's own.
+        return self._export_pipeline(
+            "dicom", folder, patient_ids=patient_ids, subset=subset,
+            check_burned_in=check_burned_in,
+            check_reversibility=check_reversibility,
+            show_progress=show_progress,
+            format_options={"use_compression": use_compression,
+                            "verify_readback": verify_readback})
+
+    def _export_pipeline(self, fmt, folder, *, patient_ids=None, subset=None,
+                         check_burned_in=False, check_reversibility=True,
+                         show_progress=True, format_options=None):
+        """Run one export: the gates every format shares, around its own work.
+
+        Both built-in formats come here (#783): `_export_dicom` after Python
+        has bound its options, and `WfdbExporter.export` after its own
+        option check. The format contributes its plan, its write, its
+        `EXPORT` row text and its error. Everything else is here, once, in
+        this order:
+
+        1. The selections: `patient_ids` (`select_patient_ids`) and
+           `subset` (`_resolve_subset`), each refused for its shape.
+        2. The `burned_in_text` policy and reader refusals, for a format
+           that writes pixels, and the re-audit's scrub refusal.
+        3. The tag re-audit, under `check_burned_in`.
+        4. The save, then (`dicom`) the memory release.
+        5. The format's plan, then (under the policy) the read of what it
+           will write.
+        6. The rows about the plan: withheld, gated, unmatched IDs and
+           subset values, and the stale-policy notice over the instances
+           attempted.
+        7. The format's write.
+        8. The collision report and the recoverable-identity disclosure,
+           for a format whose files the plan names; the delivery counters;
+           the `EXPORT` row; `ExportError`, last.
+
+        Nothing refuses after the save, and no row is written before it.
+
+        Args:
+            fmt (str): `"dicom"` or `"wfdb"`, a key of `_EXPORT_FORMATS`.
+            folder (str): The output folder.
+            patient_ids (Iterable[str], optional): As `export()` takes it.
+            subset (optional): As `export()` takes it.
+            check_burned_in (bool): Re-audit, and withhold what still
+                carries an identifier.
+            check_reversibility (bool): Report a delivered identity token.
+            show_progress (bool): Draw progress bars.
+            format_options (dict, optional): The format's own options,
+                already checked by its door.
+
+        Returns:
+            Any: The format's result: an `ExportSummary` for `dicom`, a
+            `List[str]` for `wfdb`.
+        """
+        fmt = _EXPORT_FORMATS[fmt]
+        format_options = dict(format_options or {})
         # One helper for every door that selects patients, so
         # `patient_ids` means the same thing whichever format was named
         # and whichever door was used: only `None` is every
         # patient, an iterator is materialised before the walk can eat
         # it, and a bare `str`, a bytes-like value, a non-iterable or a
-        # non-`str` element is refused. The wfdb door and
-        # `get_cohort_report` call the same function; a door that reads
-        # the argument its own way would disagree with the others.
+        # non-`str` element is refused. `get_cohort_report` calls the same
+        # function; a door that reads the argument its own way would
+        # disagree with the others.
         #
-        # First statement in the method, and before the `save(sync=True)`
+        # First statement, and before the `save(sync=True)`
         # below on purpose: a refusal that arrives after the flush has
         # already moved the session for an export that will not happen.
         selection = select_patient_ids(patient_ids, self.store.patients)
@@ -8499,9 +8828,11 @@ class DicomSession:
 
         # A `burned_in_text` policy assigned in code that a file could not
         # hold is refused here, before the scan and the save, as the
-        # subset is (#1108).
-        policy = config_manager._burned_in_text_policy(
+        # subset is (#1108). Only for a format that writes pixels: `wfdb`
+        # writes none, and never read the policy.
+        policy = (config_manager._burned_in_text_policy(
             self.configuration.burned_in_text, "session.configuration")
+            if fmt.writes_pixels else None)
         # Under the policy, `check_burned_in=True` also reads the pixels
         # it is about to write (#1108, Q6). Refused here when OCR cannot
         # run, before the tag scan re-records a status and before the
@@ -8520,12 +8851,14 @@ class DicomSession:
         identifying_uids = (self._scan_before_export()
                             if check_burned_in else None)
 
-        get_logger().info("Exporting session to: %s", folder)
-        print("Preparing export plan...")
+        fmt.announce(folder)
 
         # Flush before the walk: a large export loads pixels back in, and
         # holding both the pending edits and the frames being written has
-        # been enough to run a redaction session out of memory.
+        # been enough to run a redaction session out of memory. A WFDB
+        # export saves for the same reason the DICOM one does (#809):
+        # `export()` is documented to save the session before it writes,
+        # and one that did not left `anonymize()`'s edits only in memory.
         #
         # `sync=True`, and it must stay. A plain `save()` enqueues on the
         # persistence worker and returns, so it would flush *concurrently
@@ -8537,193 +8870,125 @@ class DicomSession:
         # entry and `redact()` before it writes, for the same reason. The price
         # is `save()`'s documented one: a wedged worker wedges the export
         # instead of racing it.
-        print("Saving pending changes to free memory...")
-        self.save(sync=True)
-        self._release_memory(show_progress)
+        #
+        # Only with a store behind the session: `save()` writes to
+        # `store_backend`, and None is a value a caller can set (the WFDB
+        # door always allowed it).
+        if self.store_backend is not None:
+            self.save(sync=True)
+        if fmt.releases_memory:
+            self._release_memory(show_progress)
 
-        tasks, patient_count, withheld, gated = self._build_export_plan(
-            _ExportOptions(folder, identifying_uids, allowed_uids,
-                           use_compression, verify_readback,
-                           read_burned_in_text=read_pixels),
-            target_ids)
-        if read_pixels and tasks:
-            tasks, read_gated = self._read_before_export(
-                tasks, policy, folder, show_progress)
-            gated.extend(read_gated)
+        options = _ExportOptions(
+            folder, identifying_uids, allowed_uids,
+            bool(format_options.get("use_compression", False)),
+            bool(format_options.get("verify_readback", False)),
+            read_burned_in_text=read_pixels)
+        run = fmt.plan(self, options, target_ids)
+        if read_pixels and run.tasks:
+            run.tasks, read_gated = self._read_before_export(
+                run.tasks, policy, folder, show_progress)
+            run.gated.extend(read_gated)
 
         # Before the empty-plan branch, so an export that withheld
         # everything still leaves one row per instance it held back,
         # rather than reading as an empty plan under PASS.
-        _audit_withheld_instances(self.store_backend, folder, withheld)
+        _audit_withheld_instances(self.store_backend, folder, run.withheld,
+                                  fmt.label)
         # The `burned_in_text` gate's rows (#1108), one per instance it
         # withheld or wrote unchecked, in the same place for the same
         # reason. `WARNING`, so each costs the run its PASS.
-        for uid, detail, _hold in gated:
-            self.store_backend.log_audit(
-                action_type="WARNING", entity_uid=uid or "UNKNOWN",
-                details=" ".join(detail.split()).replace("|", "\\|"))
-        held_by_policy = sum(1 for _uid, _detail, hold in gated if hold)
+        for uid, detail, _hold in run.gated:
+            if self.store_backend is not None:
+                self.store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid or "UNKNOWN",
+                    details=" ".join(detail.split()).replace("|", "\\|"))
+        held_by_policy = sum(1 for _uid, _detail, hold in run.gated if hold)
 
         # The ids that selected nobody, counted and never named,
         # and the subset's values that name nothing, the same way.
-        # Here and not at the selections above: `_scan_before_export` can
-        # still refuse after them, and a row saying an export selected
-        # short, for an export that never ran, is a fabrication. Before
-        # both empty-plan branches and
-        # outside the `if tasks:` below, so an export whose every id was
+        # Here and not at the selections above: `_scan_before_export` and
+        # the save can still refuse after them (#721, #949), and a row
+        # saying an export selected short, for an export that never ran, is
+        # a fabrication (before #783 the `wfdb` door wrote it there). Before
+        # every empty-plan branch, so an export whose every id was
         # unknown -- which plans nothing -- still says why. `WARNING`, so
         # the report grades `REVIEW_REQUIRED`: a short export under PASS
         # would read as a complete one.
         if selection.unmatched:
             sentence = unmatched_patient_ids_sentence(selection)
             get_logger().warning(sentence)
-            self.store_backend.log_audit(
-                action_type="WARNING", entity_uid=folder,
-                details=f"DICOM export to {folder}: {sentence}")
+            if self.store_backend is not None:
+                self.store_backend.log_audit(
+                    action_type="WARNING", entity_uid=folder,
+                    details=f"{fmt.label} export to {folder}: {sentence}")
         if subset_selection.unmatched:
             sentence = unmatched_subset_uids_sentence(subset_selection)
             get_logger().warning(sentence)
-            self.store_backend.log_audit(
-                action_type="WARNING", entity_uid=folder,
-                details=f"DICOM export to {folder}: {sentence}")
+            if self.store_backend is not None:
+                self.store_backend.log_audit(
+                    action_type="WARNING", entity_uid=folder,
+                    details=f"{fmt.label} export to {folder}: {sentence}")
 
-        # Over the instances this export will write, after the pre-export
+        # Over the instances this export will attempt, after the pre-export
         # scan -- which re-records every status under the policy in force,
         # so `check_burned_in=True` never draws it -- and only when there
-        # are some. The plan holds instances; the notice reads
-        # their patient and study too.
-        if tasks:
-            planned = {id(task.instance) for task in tasks}
-            self._report_statuses_under_another_policy(
-                [(patient, study, instance)
-                 for patient in self.store.patients
-                 for study in patient.studies
-                 for series in study.series
-                 for instance in series.instances
-                 if id(instance) in planned],
-                folder, "DICOM")
+        # are some. For `wfdb` only the instances that hold a waveform: a
+        # CT slice sharing a series with an ECG is written nowhere, so its
+        # status is not this export's to report.
+        attempted = fmt.attempted(self, run)
+        if attempted:
+            self._report_statuses_under_another_policy(attempted, folder,
+                                                       fmt.label)
 
-        if not tasks and (withheld or held_by_policy):
-            requested = len(withheld) + held_by_policy
-            get_logger().warning(
-                "No instances exported: all %d were withheld by the %s.",
-                requested,
-                ("pre-export scan" if not held_by_policy else
-                 "burned_in_text policy" if not withheld else
-                 "pre-export scan and the burned_in_text policy"))
-            # Counted, unlike a true empty plan: the caller asked for
-            # these instances and none was written, which is exactly what
-            # "0 of K requested" says. A zero here is a fact about this
-            # export, not a stand-in for "not answered".
-            self._last_export_written = 0
-            self._last_export_requested = requested
-            if not held_by_policy:
-                # Byte for byte what it was before #1108.
-                details = (f"DICOM export to {folder}: wrote 0 of "
-                           f"{len(withheld)} requested instances; all "
-                           f"{len(withheld)} were withheld by the pre-export "
-                           f"scan (check_burned_in=True).")
-            else:
-                by = ([f"{len(withheld)} by the pre-export scan "
-                       f"(check_burned_in=True)"] if withheld else [])
-                by.append(f"{held_by_policy} by the burned_in_text policy")
-                details = (f"DICOM export to {folder}: wrote 0 of {requested} "
-                           f"requested instances; all {requested} were "
-                           f"withheld, {' and '.join(by)}.")
-            self.store_backend.log_audit(
-                action_type="EXPORT",
-                entity_uid=folder,
-                details=details)
-            # Returned, not `ExportError`: nothing was attempted and
-            # nothing failed. The rows above grade the run and the
-            # counters say none of it was written.
-            return ExportSummary()
+        result = fmt.write(self, folder, run, show_progress, format_options,
+                           held_by_policy)
 
-        if not tasks:
-            get_logger().warning("No instances found to export.")
-            # Still an export run, so it still writes its row: a
-            # subset that matched nothing is a fact about this run the
-            # audit trail has to carry, and the report's export boundary
-            # keys on the row's existence, not on files.
-            self.store_backend.log_audit(
-                action_type="EXPORT",
-                entity_uid=folder,
-                details=(f"DICOM export to {folder}: wrote 0 of 0 planned "
-                         f"instances; nothing matched the export plan."))
-            # Zero of zero, and deliberately not an `ExportError`: a
-            # plan that matched nothing is not an export that failed,
-            # and the row above already says so. The caller still gets a
-            # summary rather than `None`, so `.written` and `.failures`
-            # are askable on every return path.
-            return ExportSummary()
-
-        print(f"Exporting {len(tasks)} images from {patient_count} patients...")
-        summary = self._run_export_batch(tasks, show_progress,
-                                         self.store_backend)
-
-        # Edits `summary`: an instance whose file another instance's write
-        # replaced leaves `written_uids` for `failures` (#1020), so
-        # everything below counts what the folder holds.
-        replaced = self._report_export_collisions(tasks, summary)
-
-        # After the batch, not before it. The disclosure is a statement
-        # about files a recipient holds, so it has to be made from what
-        # was written rather than from what was planned.
-        if check_reversibility:
-            self._report_recoverable_identities(tasks, summary.written_uids,
-                                                replaced)
+        if result.ran and fmt.files_by_plan:
+            # Edits `summary`: an instance whose file another instance's
+            # write replaced leaves `written_uids` for `failures` (#1020),
+            # so everything below counts what the folder holds.
+            replaced = self._report_export_collisions(run.tasks, result.value)
+            # After the batch, not before it. The disclosure is a statement
+            # about files a recipient holds, so it has to be made from what
+            # was written rather than from what was planned.
+            if check_reversibility:
+                self._report_recoverable_identities(
+                    run.tasks, result.value.written_uids, replaced)
 
         # Recorded for `generate_report`, so the report counts what was
-        # written, not only the object graph.
-        self._last_export_written = summary.written
-        # Withheld instances were requested and not written, so they are
-        # in the denominator: the count answers for the cohort, not for
-        # the plan.
-        self._last_export_requested = len(tasks) + len(withheld) + held_by_policy
+        # written, not only the object graph. None leaves the row out.
+        counters = fmt.counters(run, result, held_by_policy)
+        if counters is not None:
+            self._last_export_written, self._last_export_requested = counters
 
-        # The run itself is an audited action, not only its failures.
-        # One row per run rather than per instance -- the
-        # per-instance record is the output tree itself; this row says
-        # how much of the plan reached it, and its existence is what
-        # `generate_report` keys the export boundary on, durably
-        # across a session reopened on this store.
+        # The run itself is an audited action, not only its failures: one
+        # row per run, whose existence is what `generate_report` keys the
+        # export boundary on, durably across a session reopened on this
+        # store. Its text is the format's, byte for byte.
         #
-        # The withheld clause is appended only when something was
-        # withheld, so a run that withheld nothing writes the row
-        # without it, byte for byte.
-        withheld_clause = (f"; {len(withheld)} more withheld by the "
-                           f"pre-export scan (check_burned_in=True)"
-                           if withheld else "")
-        # The same for the `burned_in_text` gate (#1108): its own clause,
-        # so neither count is said in the other's words.
-        if held_by_policy:
-            withheld_clause += (f"; {held_by_policy} more withheld by the "
-                                f"burned_in_text policy")
-        self.store_backend.log_audit(
-            action_type="EXPORT",
-            entity_uid=folder,
-            details=(f"DICOM export to {folder}: wrote {summary.written} "
-                     f"of {len(tasks)} planned instances from "
-                     f"{patient_count} patients{withheld_clause}."))
-        print("Done.")
+        # Guarded, as every row here is: None is a value a caller can set
+        # for `store_backend` (the WFDB door always allowed it). `log_audit`
+        # with the action word spelled at the call, which the frozen
+        # vocabulary pin reads.
+        if self.store_backend is not None:
+            self.store_backend.log_audit(
+                action_type="EXPORT", entity_uid=folder,
+                details=fmt.export_row(folder, run, result, held_by_policy))
+        fmt.finish(result)
 
-        # Last, after all five records -- the collision report, the
+        # Last, after every record -- the collision report, the
         # recoverable-identity disclosure, the delivery counters, the
-        # `EXPORT` row and `Done.` -- and in that order for the reason
+        # `EXPORT` row -- and in that order for the reason
         # `_apply_redaction_rules` raises `RedactionError` last: a caller
         # who catches this still holds a correct graph, a complete audit
         # trail and a report that grades REVIEW_REQUIRED. Raising earlier
-        # would trade all of that for the exception.
-        #
-        # `written == 0 **and** failures`, never `written == 0` alone: an
-        # empty plan reaching here would otherwise raise, and zero of
-        # zero is not a failure. A *partial* export does not raise
-        # either -- two files out of three is a real result, and raising
-        # would discard the summary naming which two.
-        if summary.written == 0 and summary.failures:
-            raise ExportError(summary.failures, len(tasks), folder)
-
-        return summary
+        # would trade all of that for the exception. Not guarded on
+        # `store_backend`: the exception is the caller's channel.
+        error = fmt.error(folder, run, result)
+        if error is not None:
+            raise error
+        return result.value
 
     def _report_recoverable_identities(self, tasks, written_uids,
                                        replaced=frozenset()) -> int:
