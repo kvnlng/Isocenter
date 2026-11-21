@@ -11,6 +11,8 @@ because the test reads it from another process.
 import json
 import os
 
+from pydicom.multival import MultiValue
+
 from isocenter import exporters
 
 
@@ -23,12 +25,36 @@ def _icons_in(dataset):
     return found
 
 
+def _texts_in(dataset):
+    """Every text value at any depth of `dataset` and of its file meta:
+    each `str`, each value of a multi-valued element, and each `bytes`
+    value read as Latin-1, so a UID held in any of them is found."""
+    found = []
+
+    def take(value):
+        if isinstance(value, (bytes, bytearray)):
+            found.append(bytes(value).decode("latin-1"))
+        elif isinstance(value, (list, tuple, MultiValue)):
+            for one in value:
+                take(one)
+        elif value is not None:
+            found.append(str(value))
+
+    for element in dataset.iterall():
+        if element.VR != "SQ":
+            take(element.value)
+    for element in getattr(dataset, "file_meta", None) or ():
+        take(element.value)
+    return found
+
+
 def _record(dataset, item, folder, options):
     pixels = None
     if "PixelData" in dataset:
         pixels = int(dataset.pixel_array.max())
     return {
         "tags": sorted(f"{int(e.tag):08x}" for e in dataset),
+        "texts": _texts_in(dataset),
         "pixel_max": pixels,
         "icons": _icons_in(dataset),
         "patient_identity_removed": dataset.get("PatientIdentityRemoved"),
@@ -141,3 +167,46 @@ class Spoofed(exporters.Exporter):
 
 
 Spoofed.__module__ = DicomFormatExporter.__module__
+
+
+class Aggregate(exporters.Exporter):
+    """Appends every instance to one shared file and returns None: what it
+    was handed is in the folder, under no path it named (review of #1197)."""
+
+    def write(self, dataset, item, folder, **options):
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "all.jsonl"), "a",
+                  encoding="utf-8") as handle:
+            handle.write(json.dumps(
+                {"uid": item.sop_instance_uid,
+                 "has_token": 0x04000500 in dataset}) + "\n")
+        return None
+
+
+class WriteThenRaise(exporters.Exporter):
+    """Writes what it was handed, then raises."""
+
+    def write(self, dataset, item, folder, **options):
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{item.sop_instance_uid}.jsonl")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"has_token": 0x04000500 in dataset}))
+        raise RuntimeError("late failure")
+
+
+class OptionNamedDataset(exporters.Exporter):
+    """Names an option `write` takes as its own argument."""
+
+    options = frozenset({"dataset"})
+
+    def write(self, dataset, item, folder, **options):
+        return None
+
+
+class OptionNamedItem(exporters.Exporter):
+    """Names an option `write` takes as its own argument."""
+
+    options = frozenset({"item"})
+
+    def write(self, dataset, item, folder, **options):
+        return None

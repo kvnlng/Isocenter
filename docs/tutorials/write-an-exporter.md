@@ -33,7 +33,11 @@ Isocenter's test suite, and every output shown is checked.
   copies the input file from pydicom into `input/`.
 - Paste the blocks into a Python prompt or a notebook. In a `.py`
   script, put them under `if __name__ == "__main__":`
-  ([why](../quickstart.md#1-initialize-a-session)).
+  ([why](../quickstart.md#1-initialize-a-session)). The exporter class
+  is the exception: it stays in its own file, `patient_id_json.py`,
+  never under that line. A worker process does not run the block under
+  it, so a class defined there is missing in the worker, and
+  `register()` refuses it.
 - In a block with `>>>`, type what follows each `>>>`. The lines
   under it are what Python prints. A `...` inside a printed value
   stands for a part that differs on every run, such as a pseudonym or

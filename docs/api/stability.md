@@ -897,8 +897,10 @@ names both spellings
   constant `SOURCE_SOP_UID_ATTR`. That constant is the `attributes` key
   under which an instance keeps the SOP Instance UID it held before its
   UID first changed (the ingested one, unless `sop_instance_uid` was
-  assigned first). `exported_patient_id` is on the registry's
-  provisional terms (below).
+  assigned first). A plugin exporter does not need
+  `exported_patient_id`: since 1.1 the export applies it before `write`
+  gets the dataset, and `ExportItem.patient_id` holds its answer
+  ([The exporter contract](#the-exporter-contract)).
 - **The [OCR API](ocr.md) page**: `DiscoveryCandidate`,
   `ZoneDiscoverer.group_boxes`,
   `RedactionVerifier` (`__init__`, `get_matching_rule`, `is_covered`,

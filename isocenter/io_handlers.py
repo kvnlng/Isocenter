@@ -7197,6 +7197,12 @@ class ExportOutcome:
     #: Every return of the worker sets it, the refusal raised first and the
     #: failure arm included, because the parent orders the results by it.
     position: Optional[int] = None
+    #: True when the worker called a plugin's `write()` with this
+    #: instance's dataset (#783), whatever `write()` then did: returned a
+    #: path, returned None, or raised. The recoverable-identity disclosure
+    #: counts every such instance as delivered (owner ruling Q-A), because
+    #: Isocenter cannot tell what a plugin kept of what it was handed.
+    handed: bool = False
 
 
 @dataclass
@@ -7250,6 +7256,10 @@ class ExportSummary:
     _paths_by_position: Dict[int, str] = field(
         default_factory=dict, repr=False, compare=False)
     _skipped: List[Optional[str]] = field(
+        default_factory=list, repr=False, compare=False)
+    # The UID of each instance whose dataset a plugin's `write()` was
+    # handed (`ExportOutcome.handed`), for the disclosure.
+    _handed: List[Optional[str]] = field(
         default_factory=list, repr=False, compare=False)
 
     @property
@@ -9494,10 +9504,11 @@ def _serialize_dicom(built: _Built, ctx: ExportContext, losses, corrections,
     """Write `built` as a DICOM file at `ctx.output_path` (#783).
 
     The conformance and delivery half of the export worker: compression
-    and the IOD check (`_finalize_dataset`), the notes and warnings about
-    the label as written, Encapsulated Document Length, the ambiguous VRs,
-    the long-value relabelling, then the temporary write, `verify_readback`
-    and the rename. Nothing here is a privacy gate: those are all in
+    and the IOD check (`_finalize_dataset`), the notes about the label as
+    written, the rows about the source's own claims
+    (`_check_source_claims`, which a plugin's path runs too), Encapsulated
+    Document Length, the long-value relabelling, then the temporary write,
+    `verify_readback` and the rename. Nothing here is a privacy gate: those are all in
     `_build_export_dataset`, which a plugin's dataset goes through too.
 
     Args:
@@ -9583,52 +9594,16 @@ def _serialize_dicom(built: _Built, ctx: ExportContext, losses, corrections,
         corrections.append(_PILLOW_J2K_NOTE.format(
             bits=int(ds.BitsAllocated), samples=int(ds.SamplesPerPixel)))
 
-    # The third arm's label judgement: a file with no pixel
-    # element never reaches `_write_pixel_geometry`, which judges the
-    # other two. After `_finalize_dataset`, because the syntax judged
-    # has to be the one in `ds.file_meta` -- a pixel-less file stays
-    # native under `compression="j2k"`, where `written_syntax` says
-    # JPEG 2000 -- and before `save_as`, so the sentence rides the
-    # outcome of the file it describes. An `IODValidator` refusal
-    # raises first and the instance fails with its own ERROR, which is
-    # the right order: a warning describes a file that was written.
-    #
-    # Keyed on the arm -- no pixel arm set `written_pixels`, which is
-    # exactly "`_write_pixel_geometry` was not called". That is also
-    # exactly "no pixel element is in the file": only None and `"j2k"`
-    # reach the integer arm, and each writes the element (the raw
-    # bytes, or the encoder), so the arm that set `written_pixels`
-    # always wrote one. Keep the key on the arm regardless: the arm is
-    # what decides which of the two label judgements ran.
-    if written_pixels is None:
-        warning = _pixel_less_label_warning(ds)
-        if warning is not None:
-            warnings.append(warning)
-
-    # The fallback's WARNING for the top-level label, here and not
-    # where the label was respelled: it says what the file holds, and
-    # over pixels the resolver may have written another label since
-    # (one sample is `MONOCHROME2` whatever was declared), so it is
-    # read against `ds` as it now stands.
-    label = ds.get("PhotometricInterpretation")
-    fell_back = _label_fallback_warning(
-        inst.attributes,
-        in_file=[] if label is None
-        else list(label) if isinstance(label, MultiValue) else [label])
-    if fell_back is not None:
-        warnings.append(fell_back)
+    # The rows about the source's own claims (owner ruling Q-B on #783),
+    # shared with a plugin's path. Here, after `_finalize_dataset`, so the
+    # label and the syntax judged are the ones this file is written with.
+    _check_source_claims(ds, written_pixels, inst, losses, warnings,
+                         check_iod=False)
 
     # Encapsulated Document Length follows the document this file
     # carries (#757). After every merge and the finalize, so it reads
     # the bytes that will be written.
     _encapsulated_document_length(ds, corrections)
-
-    # Every ambiguous VR gets a concrete arm here, while the dataset
-    # is complete and before `save_as` asks the same question and
-    # fails the file over it. `save_as` asks again and finds nothing
-    # left to decide, so a file pydicom could already resolve is
-    # written byte for byte as pydicom alone would write it.
-    _resolve_ambiguous_vrs(ds, losses, warnings)
 
     # A value too long for its VR's 2-byte Explicit VR length is
     # written `UN`, and said (#692). After the ambiguous VRs are
@@ -9694,6 +9669,82 @@ def _serialize_dicom(built: _Built, ctx: ExportContext, losses, corrections,
         raise
 
 
+def _check_source_claims(ds, written_pixels, inst, losses, warnings, *,
+                         check_iod):
+    """The rows about the source data's own claims, for both paths (#783).
+
+    Owner ruling Q-B (2026-11-21): the `WARNING` and `DATA_LOSS` rows that
+    report on the source data are written for a plugin export too. They
+    are the pixel-less file's label, the label fallback, and the ambiguous
+    VRs, which this also resolves on `ds`. The DICOM serializer calls this
+    after `_finalize_dataset`; the plugin path calls it on the built
+    dataset, which is never compressed, just before `write()`.
+
+    Args:
+        ds (pydicom.Dataset): The dataset as it will be written or handed.
+        written_pixels (Optional[np.ndarray]): What the pixel arm wrote;
+            None when no pixel arm ran.
+        inst (Instance): The instance.
+        losses (list): Appended to.
+        warnings (list): Appended to.
+        check_iod (bool): Also check the IOD and say what it lacks as a
+            `WARNING`. For a plugin only: the DICOM serializer checks it
+            in `_finalize_dataset` and fails the file instead, because it
+            will not write a file that does not conform. A plugin writes
+            its own format, so its instance is handed over and the gap
+            is said.
+    """
+    if check_iod:
+        errs = IODValidator.validate(ds)
+        if errs:
+            warnings.append(
+                f"The dataset does not conform to its IOD: {errs}. A DICOM "
+                f"export of this instance fails with this list; the "
+                f"exporter was handed it as it is.")
+
+    # The third arm's label judgement: a file with no pixel
+    # element never reaches `_write_pixel_geometry`, which judges the
+    # other two. After `_finalize_dataset`, because the syntax judged
+    # has to be the one in `ds.file_meta` -- a pixel-less file stays
+    # native under `compression="j2k"`, where `written_syntax` says
+    # JPEG 2000 -- and before `save_as`, so the sentence rides the
+    # outcome of the file it describes. An `IODValidator` refusal
+    # raises first and the instance fails with its own ERROR, which is
+    # the right order: a warning describes a file that was written.
+    #
+    # Keyed on the arm -- no pixel arm set `written_pixels`, which is
+    # exactly "`_write_pixel_geometry` was not called". That is also
+    # exactly "no pixel element is in the file": only None and `"j2k"`
+    # reach the integer arm, and each writes the element (the raw
+    # bytes, or the encoder), so the arm that set `written_pixels`
+    # always wrote one. Keep the key on the arm regardless: the arm is
+    # what decides which of the two label judgements ran.
+    if written_pixels is None:
+        warning = _pixel_less_label_warning(ds)
+        if warning is not None:
+            warnings.append(warning)
+
+    # The fallback's WARNING for the top-level label, here and not
+    # where the label was respelled: it says what the file holds, and
+    # over pixels the resolver may have written another label since
+    # (one sample is `MONOCHROME2` whatever was declared), so it is
+    # read against `ds` as it now stands.
+    label = ds.get("PhotometricInterpretation")
+    fell_back = _label_fallback_warning(
+        inst.attributes,
+        in_file=[] if label is None
+        else list(label) if isinstance(label, MultiValue) else [label])
+    if fell_back is not None:
+        warnings.append(fell_back)
+
+    # Every ambiguous VR gets a concrete arm here, while the dataset
+    # is complete and before `save_as` asks the same question and
+    # fails the file over it. `save_as` asks again and finds nothing
+    # left to decide, so a file pydicom could already resolve is
+    # written byte for byte as pydicom alone would write it.
+    _resolve_ambiguous_vrs(ds, losses, warnings)
+
+
 def _write_through_plugin(ds, ctx: ExportContext) -> Optional[str]:
     """Hand the built dataset to the plugin class on `ctx.writer` (#783).
 
@@ -9754,6 +9805,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     corrections: List[str] = []
     warnings: List[str] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
+    handed = False
 
     try:
         # Refused where the context was built (`export_output_path`), and
@@ -9770,6 +9822,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # outcome is the same shape either way, so the parent's rows,
         # summary and order serve both.
         if ctx.writer is not None:
+            _check_source_claims(built.ds, built.written_pixels,
+                                 ctx.instance, losses, warnings,
+                                 check_iod=True)
+            # Set before the call: a `write()` that raises may already
+            # have written what it was handed (owner ruling Q-A).
+            handed = True
             output_path = _write_through_plugin(built.ds, ctx)
         else:
             _serialize_dicom(built, ctx, losses, corrections, warnings)
@@ -9778,7 +9836,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
                              warnings=warnings,
-                             position=getattr(ctx, "position", None))
+                             position=getattr(ctx, "position", None),
+                             handed=handed)
     except Exception as e:
         # Do not raise, as it aborts the entire parallel batch.
         # Report the failure back for the parent to count and raise on.
@@ -9800,7 +9859,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
                              warnings=warnings, error=e,
-                             position=getattr(ctx, "position", None))
+                             position=getattr(ctx, "position", None),
+                             handed=handed)
 
 
 class _J2kFrameRefusal(RuntimeError):
@@ -13468,6 +13528,8 @@ class DicomExporter:
             _skipped=[r.sop_instance_uid for r in results
                       if isinstance(r, ExportOutcome) and r.ok
                       and r.output_path is None],
+            _handed=[r.sop_instance_uid for r in results
+                     if isinstance(r, ExportOutcome) and r.handed],
             # Parallel to `failures`: `_report_export_failures` appends one
             # entry per result that is not an `ok` outcome, in this order.
             _failure_positions=[

@@ -94,11 +94,16 @@ the process that started it.
 its project secret. Changing `dataset` changes nothing in the session,
 because the worker holds a copy.
 
-The dataset is not passed through the DICOM export's conformance steps,
-which come after the cut: the IOD check, the resolution of ambiguous
-VRs, the relabelling of long values as `UN`, Encapsulated Document
-Length, `use_compression` and `verify_readback`. The rows that those
-steps write for a DICOM file are not written for a plugin either.
+The rows about the source data are written for a plugin export too,
+in the DICOM export's words: the ambiguous value representations (which
+are resolved on the dataset you get), the label of a file with no
+pixels, and the label fallback. Where the IOD check finds a gap, the
+DICOM export fails the file; a plugin export hands you the dataset and
+writes a `WARNING` row that names the gap.
+
+The DICOM-only rewrites are not applied to the dataset: the relabelling
+of long values as `UN`, Encapsulated Document Length, `use_compression`
+and `verify_readback`.
 
 ## What `export()` does around it
 
@@ -142,12 +147,19 @@ It does not read back what `write()` wrote.
    the others fail. A file that is not DICOM names none, so all of them
    fail.
 4. **Decide deliberately what to do with `(0400,0500)`–`(0400,0520)`.**
-   After `lock_identities()` they hold the recoverable identity, and the
-   disclosure counts an instance whose file exists.
+   After `lock_identities()` they hold the recoverable identity. The
+   disclosure counts every instance whose dataset `write()` was handed,
+   whatever `write()` did with it: returned a path, returned `None` or
+   raised.
 5. **Define your class in an importable module**, at its top level.
+   Not in a function, a notebook cell or the prompt, and not under a
+   script's `if __name__ == "__main__":`. A worker process does not run
+   that block, so `register()` refuses a class defined in it.
 6. **Name your options in `options`.** A name that `export()` itself
    takes (`patient_ids`, `subset`, `check_burned_in`,
-   `check_reversibility`, `show_progress`) is refused by `register()`.
+   `check_reversibility`, `show_progress`) is refused by `register()`,
+   and so is a name of `write()`'s own arguments (`dataset`, `item`,
+   `folder`).
 
 `register()` raises `ValueError` for the names `dicom` and `wfdb`, which
 are the built-in formats'. It raises `TypeError` for a class that does

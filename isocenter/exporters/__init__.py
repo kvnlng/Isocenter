@@ -6,6 +6,7 @@ format by its name. The two built-in formats are `dicom` and `wfdb`. A
 plugin implements `Exporter.write`, and is handed, once per instance, the
 dataset that the DICOM export would write (#783).
 """
+import ast
 import pickle
 import sys
 from typing import Any, Dict, List
@@ -23,6 +24,12 @@ _BUILT_IN_NAMES = frozenset({"dicom", "wfdb"})
 #: takes them. A plugin's `options` may not name one.
 _SESSION_OPTIONS = frozenset({"patient_ids", "subset", "check_burned_in",
                               "check_reversibility", "show_progress"})
+
+#: The names of `write`'s own arguments. An option of one of these names
+#: would reach `write(dataset, item, folder, **options)` twice and fail
+#: every instance with `TypeError` in the worker, so `register()` refuses
+#: it (review of #1197).
+_WRITE_ARGUMENTS = frozenset({"dataset", "item", "folder"})
 
 
 class Exporter:
@@ -85,6 +92,18 @@ def _install_built_in(name: str, exporter_cls) -> None:
     _REGISTRY[name] = exporter_cls
 
 
+def _defined_at_the_top_of(path, name) -> bool:
+    """Whether the file at `path` defines class `name` as a top-level
+    statement, which a spawned worker runs when it imports the file."""
+    try:
+        with open(path, "rb") as handle:
+            tree = ast.parse(handle.read())
+    except (OSError, SyntaxError, ValueError):
+        return False
+    return any(isinstance(node, ast.ClassDef) and node.name == name
+               for node in tree.body)
+
+
 def _importable_by_a_worker(exporter_cls) -> bool:
     """Whether a spawned worker can import `exporter_cls` by module and name.
 
@@ -92,15 +111,28 @@ def _importable_by_a_worker(exporter_cls) -> bool:
     A class that does not come back as itself (defined in a function, or
     under a `__module__` it is not in) would fail every instance in the
     worker, and so does one in a `__main__` that has no file (the
-    interactive prompt, a notebook). Not covered: a module this process
-    imports through a `sys.path` entry that a worker does not get.
+    interactive prompt, a notebook).
+
+    A class in the `__main__` of a script must also be a top-level
+    statement of that file. A spawned worker imports the script under
+    another name, so the block under the script's main guard does not run
+    there: a class defined in it is missing, and the pool fails with
+    `BrokenProcessPool` (review of #1197). The round trip cannot see that,
+    because in this process the class is there. A class under any other
+    statement (`if`, `try`, `with`) is refused too: the file is read, not
+    run, so its condition cannot be judged.
+
+    Not covered: a module this process imports through a `sys.path` entry
+    that a worker does not get.
     """
     try:
         same = pickle.loads(pickle.dumps(exporter_cls)) is exporter_cls
     except Exception:  # pylint: disable=broad-except
         return False
     if same and exporter_cls.__module__ == "__main__":
-        return bool(getattr(sys.modules.get("__main__"), "__file__", None))
+        path = getattr(sys.modules.get("__main__"), "__file__", None)
+        return bool(path) and _defined_at_the_top_of(
+            path, exporter_cls.__qualname__)
     return same
 
 
@@ -124,10 +156,11 @@ def register(name: str, exporter_cls) -> None:
         TypeError: If `exporter_cls` is not a class or does not implement
             `write`. A class written for 1.0, with only
             `export(session, folder, **options)`, is told so. Also if its
-            `options` is not a `frozenset` of `str` or names an option
-            that `export()` takes itself, or if an export worker process
-            could not import it (a class defined in a function, a
-            notebook cell or the interactive prompt).
+            `options` is not a `frozenset` of `str`, names an option that
+            `export()` takes itself, or names `dataset`, `item` or
+            `folder`; or if an export worker process could not import it
+            (a class defined in a function, a notebook cell, the
+            interactive prompt, or under a script's main guard).
     """
     if name in _BUILT_IN_NAMES:
         raise ValueError(
@@ -164,13 +197,21 @@ def register(name: str, exporter_cls) -> None:
             f"{exporter_cls!r} cannot be registered as the {name!r} "
             f"exporter: its options name {', '.join(map(repr, owned))}, "
             f"which session.export() reads itself.")
+    clashing = sorted(options & _WRITE_ARGUMENTS)
+    if clashing:
+        raise TypeError(
+            f"{exporter_cls!r} cannot be registered as the {name!r} "
+            f"exporter: its options name {', '.join(map(repr, clashing))}, "
+            f"which write(self, dataset, item, folder, **options) takes "
+            f"as its own arguments.")
     if not _importable_by_a_worker(exporter_cls):
         raise TypeError(
             f"{exporter_cls!r} cannot be registered as the {name!r} "
             f"exporter: an export worker process could not import it. "
             f"Define it at the top level of a module that the worker can "
-            f"import, not in a function, a notebook cell or the "
-            f"interactive prompt.")
+            f"import, not in a function, a notebook cell, the "
+            f"interactive prompt or the block under a script's "
+            f"'if __name__ == \"__main__\":'.")
     _REGISTRY[name] = exporter_cls
 
 

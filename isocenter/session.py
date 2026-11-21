@@ -715,7 +715,8 @@ def _audit_withheld_instances(store_backend, folder, withheld,
                                 entity_uid=uid or "UNKNOWN", details=detail)
 
 
-def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
+def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder,
+                            label="DICOM"):
     """What the `burned_in_text` policy says about exporting one instance
     that holds pixels (#1108), from its record and the pixels it holds.
 
@@ -731,6 +732,8 @@ def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
         zones (list): The zones the export applies to its series, which
             the digest is taken after, as the read took it.
         folder (str): The export's folder, for the row text.
+        label (str): The format's name in the row text: `DICOM`, or a
+            plugin's registered name (#783).
 
     Returns:
         Optional[tuple]: None to write it with no row; otherwise
@@ -753,7 +756,7 @@ def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
         # writes the file, and a write can still fail (review O10).
         hold = action != "report"
         verb = "withheld" if hold else "did not withhold"
-        return hold, (f"DICOM export to {folder} {verb} instance {uid}: its "
+        return hold, (f"{label} export to {folder} {verb} instance {uid}: its "
                       f"pixels were not checked for burned-in text under this "
                       f"configuration's burned_in_text policy; run redact().")
     boxes = record.get("boxes") or []
@@ -762,7 +765,7 @@ def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
     found = (f"burned_in_text found {len(boxes)} text region(s) on frame(s) "
              f"{_frames_named(boxes)}")
     if action == "withhold":
-        return True, (f"DICOM export to {folder} withheld instance {uid}: "
+        return True, (f"{label} export to {folder} withheld instance {uid}: "
                       f"{found} (action: withhold).")
     blanked = (record.get("redaction") is not None
                and record.get("redaction") == instance.attributes.get(
@@ -772,12 +775,12 @@ def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
     if action == "report":
         # A row per export that writes the text: the pass's row says what
         # was found, this one says a recipient holds it.
-        return False, (f"DICOM export to {folder} did not withhold instance {uid}: "
+        return False, (f"{label} export to {folder} did not withhold instance {uid}: "
                        f"{found}, not redacted (action: report).")
     # `redact`, found and not blanked: the redaction carrying these boxes
     # did not land, another has replaced it since, or the boxes were read
     # under another action and `redact()` has not run since.
-    return True, (f"DICOM export to {folder} withheld instance {uid}: "
+    return True, (f"{label} export to {folder} withheld instance {uid}: "
                   f"{found} that no redaction has blanked; run redact().")
 
 
@@ -1037,6 +1040,9 @@ class _ExportOptions(NamedTuple):
     #: leaves the record gate out, because a fresh read of every planned
     #: instance decides it instead (#1108, Q6).
     read_burned_in_text: bool = False
+    #: The format's name in the rows the plan writes: `DICOM`, or a
+    #: plugin's registered name (#783).
+    label: str = "DICOM"
 
 
 #: What `_why_excluded` answers for an instance the subset did not select.
@@ -1148,6 +1154,12 @@ class _DicomFormat:
         get_logger().info("Exporting session to: %s", folder)
         print("Preparing export plan...")
         print("Saving pending changes to free memory...")
+
+    @staticmethod
+    def delivered(result):
+        """The UIDs the recoverable-identity disclosure counts as
+        delivered before it looks at the folder: those written."""
+        return result.value.written_uids
 
     @staticmethod
     def plan(session, options, target_ids):
@@ -1433,6 +1445,16 @@ class _PluginFormat(_DicomFormat):
             for task in run.tasks:
                 task.output_path = paths.get(task.position, "")
         return result
+
+    @staticmethod
+    def delivered(result):
+        # Owner ruling Q-A (2026-11-21): every instance whose dataset
+        # `write()` was handed is delivered, whether it returned a path,
+        # returned None or raised. A plugin may write what it was handed
+        # anywhere (one shared file, a database), so neither the paths it
+        # returned nor the files on disk say what a recipient holds.
+        return list(result.value.written_uids) + [
+            uid for uid in result.value._handed if uid is not None]
 
     def export_row(self, folder, run, result, held_by_policy):
         # `_DicomFormat`'s words, opened with the format and the class
@@ -9028,11 +9050,11 @@ class DicomSession:
             folder, identifying_uids, allowed_uids,
             bool(format_options.get("use_compression", False)),
             bool(format_options.get("verify_readback", False)),
-            read_burned_in_text=read_pixels)
+            read_burned_in_text=read_pixels, label=fmt.label)
         run = fmt.plan(self, options, target_ids)
         if read_pixels and run.tasks:
             run.tasks, read_gated = self._read_before_export(
-                run.tasks, policy, folder, show_progress)
+                run.tasks, policy, folder, show_progress, fmt.label)
             run.gated.extend(read_gated)
 
         # Before the empty-plan branch, so an export that withheld
@@ -9099,7 +9121,7 @@ class DicomSession:
             # was written rather than from what was planned.
             if check_reversibility:
                 self._report_recoverable_identities(
-                    run.tasks, result.value.written_uids, replaced)
+                    run.tasks, fmt.delivered(result), replaced)
 
         # Recorded for `generate_report`, so the report counts what was
         # written, not only the object graph. None leaves the row out.
@@ -9146,12 +9168,15 @@ class DicomSession:
         1.0 wrote adds a `WARNING` row. An instance counts as delivered when a
         worker wrote it or its planned file exists on disk, unless
         `_report_export_collisions` found that file to hold another instance.
+        For a plugin export, every instance whose dataset `write()` was
+        handed is delivered too, whatever `write()` did (#783, Q-A).
 
         Args:
             tasks (list): The export plan: each task's instance and output
                 path.
             written_uids (Iterable[str]): The UID of every instance whose
-                content a file holds, as `_report_export_collisions` left it.
+                content a file holds, as `_report_export_collisions` left it;
+                for a plugin, also every instance `write()` was handed.
             replaced (Collection[int]): `id()` of each task whose file was
                 replaced by another instance's, as that method returned it.
 
@@ -9740,7 +9765,8 @@ class DicomSession:
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)
 
-    def _read_before_export(self, tasks, policy, folder, show_progress):
+    def _read_before_export(self, tasks, policy, folder, show_progress,
+                            label="DICOM"):
         """`export(check_burned_in=True)`'s read of what it will write (#1108).
 
         Reads every planned instance in the policy's scope (#1121; one
@@ -9765,6 +9791,7 @@ class DicomSession:
             policy (dict): The normalised policy.
             folder (str): The export's folder, for the row text.
             show_progress (bool): Show the read's progress bar.
+            label (str): The format's name in the row text (#783).
 
         Returns:
             tuple: `(tasks, gated)`: the tasks still to write, and
@@ -9832,12 +9859,12 @@ class DicomSession:
                 # Fail closed, as `redact()` does: a frame not read is a
                 # frame not checked. The reason is not quoted: it is
                 # `redact()`'s unread row that carries one.
-                detail = (f"DICOM export to {folder} {verb} instance {uid}: "
+                detail = (f"{label} export to {folder} {verb} instance {uid}: "
                           f"the pre-export read (check_burned_in=True) could "
                           f"not read its pixels in full, so its burned-in "
                           f"text was not checked.")
             elif outcome.boxes:
-                detail = (f"DICOM export to {folder} {verb} instance {uid}: "
+                detail = (f"{label} export to {folder} {verb} instance {uid}: "
                           f"the pre-export read (check_burned_in=True) found "
                           f"{len(outcome.boxes)} text region(s) on frame(s) "
                           f"{_frames_named(outcome.boxes)} (action: {action})"
@@ -9956,7 +9983,7 @@ class DicomSession:
                                     instance, series.modality, policy)):
                             verdict = _burned_in_text_verdict(
                                 instance, policy, policy_hash, zones,
-                                options.folder)
+                                options.folder, options.label)
                             if verdict is not None:
                                 hold, detail = verdict
                                 gated.append((instance.sop_instance_uid,
@@ -10099,10 +10126,14 @@ class DicomSession:
         finally:
             gc.collect()
 
-        if summary.written < len(tasks):
+        if summary.failures:
             # A partial failure must be said here, not only counted: the
             # per-file errors are in the audit log, and this is the
-            # summary that says to go and read them.
+            # summary that says to go and read them. Keyed on a failure,
+            # not on `written < len(tasks)`: a plugin's `write()` that
+            # returns None is neither written nor failed (#783), and
+            # "finished with failures" over no failure sends the reader
+            # to an audit log with no error in it.
             get_logger().warning(
                 "Export finished with failures: %d of %d instances exported. "
                 "See the audit log for per-instance errors.",

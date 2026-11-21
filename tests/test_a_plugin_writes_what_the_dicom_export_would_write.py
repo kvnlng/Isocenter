@@ -57,7 +57,9 @@ def _registry():
     for name, cls in (("recorder", plugins.Recorder),
                       ("raising", plugins.Raising),
                       ("declining", plugins.Declining),
-                      ("onefile", plugins.OneFile)):
+                      ("onefile", plugins.OneFile),
+                      ("aggregate", plugins.Aggregate),
+                      ("writethenraise", plugins.WriteThenRaise)):
         exporters.register(name, cls)
     yield
     exporters._REGISTRY.clear()
@@ -179,15 +181,31 @@ def test_a_plugin_gets_its_icons_when_nothing_is_redacted(tmp_path):
 
 
 def test_a_plugin_gets_no_bookkeeping_key_and_no_source_uid(tmp_path):
+    """The source SOP Instance UID that `anonymize()` replaced stays in the
+    graph, in `entities.SOURCE_SOP_UID_ATTR`. It is in no value of the
+    dataset a plugin is handed, at any depth or in the file meta.
+
+    The review of #1197 found the first version of this test could not
+    fail: it compared the written UID with the source, which `anonymize()`
+    alone makes differ, and read `isalnum()` over hex tags. This one goes
+    red when `_write_through_plugin` adds the bookkeeping value back as a
+    private element before `write()` (the reviewer's mutant)."""
+    from isocenter.entities import SOURCE_SOP_UID_ATTR
+
     out = tmp_path / "out"
+    source = f"{ROOT}.1.1.1"
     with _session(tmp_path) as session:
         session.audit()
         session.anonymize()
-        source = f"{ROOT}.1.1.1"
+        [instance] = [i for p in session.store.patients for st in p.studies
+                      for se in st.series for i in se.instances]
+        # The premise: the graph still holds the source UID, so a dataset
+        # built carelessly from it could carry it.
+        assert instance.attributes.get(SOURCE_SOP_UID_ATTR) == source
         session.export(str(out), format="recorder")
     [record] = _records(out)
-    assert record["sop_instance_uid"] != source
-    assert all(tag[:4].isalnum() for tag in record["tags"])
+    assert record["texts"], "the recorder saw no values at all"
+    assert not [text for text in record["texts"] if source in text]
 
 
 def test_a_plugin_gets_the_de_identification_markers(tmp_path):
@@ -352,6 +370,137 @@ def test_a_plugin_export_of_a_locked_store_writes_the_disclosure(tmp_path):
     assert len(_rows(tmp_path / "s.db", "REVERSIBLE_EXPORT")) == 1
 
 
+@pytest.mark.parametrize("fmt", ["aggregate", "writethenraise"])
+def test_every_instance_handed_to_write_counts_for_the_disclosure(
+        tmp_path, fmt):
+    """Owner ruling Q-A (2026-11-21): an instance whose dataset `write()`
+    was handed is delivered, whatever `write()` did. `aggregate` puts the
+    token in one shared file and returns None; `writethenraise` writes a
+    file and then raises. Before the ruling neither drew the disclosure,
+    because it read only `written_uids` and the planned paths."""
+    out = tmp_path / "out"
+    with _session(tmp_path) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "test.key"))
+        session.lock_identities("PAT-7831")
+        try:
+            session.export(str(out), format=fmt)
+        except ExportError:
+            assert fmt == "writethenraise"
+    # The premise: the plugin was handed the token and kept it.
+    kept = [json.loads(line) for name in os.listdir(str(out))
+            for line in open(os.path.join(str(out), name), encoding="utf-8")]
+    assert kept and all(entry["has_token"] for entry in kept)
+    assert _rows(tmp_path / "s.db", "REVERSIBLE_EXPORT") == [
+        "1 of 1 exported instances carry encrypted original identities "
+        "(0400,0500). They are recoverable with the session key; treat the "
+        "export as re-identifiable by any holder of it."]
+
+
+def test_an_instance_refused_before_write_is_not_delivered(tmp_path):
+    """The other side of Q-A: an instance the worker refused before
+    `write()` was never handed, so it draws no disclosure."""
+    out = tmp_path / "out"
+    with _session(tmp_path) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "test.key"))
+        session.lock_identities("PAT-7831")
+        [instance] = [i for p in session.store.patients for st in p.studies
+                      for se in st.series for i in se.instances]
+        instance.sop_instance_uid = ".refused"
+        with pytest.raises(ExportError):
+            session.export(str(out), format="aggregate")
+    assert _rows(tmp_path / "s.db", "REVERSIBLE_EXPORT") == []
+
+
+def test_a_plugin_that_writes_nothing_prints_no_failure_line(
+        tmp_path, capsys):
+    """Review of #1197: "Export finished with failures: 0/1" was printed
+    for an export with no failure, because the line was keyed on
+    `written < planned`."""
+    with _session(tmp_path) as session:
+        summary = session.export(str(tmp_path / "out"), format="declining")
+    assert summary.failures == []
+    assert "finished with failures" not in capsys.readouterr().out
+
+
+def test_a_plugin_that_fails_prints_the_failure_line(tmp_path, capsys):
+    with _session(tmp_path) as session:
+        with pytest.raises(ExportError):
+            session.export(str(tmp_path / "out"), format="raising")
+    assert "Export finished with failures: 0/1" in capsys.readouterr().out
+
+
+def test_the_burned_in_text_policy_rows_name_the_plugin(tmp_path):
+    """Review of #1197: the policy gate's withheld row said "DICOM export"
+    for every format. It names the format, as the `check_burned_in` rows
+    do."""
+    out = tmp_path / "out"
+    with _session(tmp_path) as session:
+        session.configuration.burned_in_text = {
+            "action": "withhold", "scope": "all", "min_confidence": 80}
+        summary = session.export(str(out), format="recorder")
+    assert summary.written_uids == []
+    withheld = [d for d in _rows(tmp_path / "s.db", "WARNING")
+                if "withheld instance" in d]
+    assert withheld == [
+        f"recorder export to {out} withheld instance {ROOT}.1.1.1: its "
+        f"pixels were not checked for burned-in text under this "
+        f"configuration's burned_in_text policy; run redact()."]
+
+
+def _ambiguous_source(tmp_path, name):
+    """A waveform with no Waveform Bits Allocated: the export resolves its
+    ambiguous VRs and writes one `WARNING` row about the source."""
+    from test_an_unresolvable_ambiguous_vr_is_written import (
+        _dataset, _save, _waveform)
+    from pydicom.uid import ExplicitVRLittleEndian
+
+    ds = _waveform(_dataset(), declare_bits=False, minmax=False,
+                   padding=True)
+    return _save(tmp_path, ds, ExplicitVRLittleEndian, name)
+
+
+def test_a_plugin_export_writes_the_rows_about_the_source_data(tmp_path):
+    """Owner ruling Q-B (2026-11-21): the rows that report on the source
+    data are written for a plugin export too, in the DICOM export's
+    words. Before, they were written by the DICOM serializer only."""
+    rows = {}
+    for fmt in ("dicom", "recorder"):
+        db = tmp_path / f"{fmt}.db"
+        with DicomSession(str(db)) as session:
+            session.ingest(_ambiguous_source(tmp_path, f"src-{fmt}"))
+            session.export(str(tmp_path / f"out-{fmt}"), format=fmt)
+        rows[fmt] = [d for d in _rows(db, "WARNING")
+                     if d.startswith("Ambiguous value representations")]
+    assert len(rows["dicom"]) == 1, rows
+    assert rows["recorder"] == rows["dicom"]
+
+
+def test_a_plugin_is_handed_an_instance_the_iod_check_refuses(tmp_path):
+    """The DICOM export fails an instance its IOD check refuses, because it
+    will not write a file that does not conform. A plugin writes its own
+    format: its instance is handed over, with a `WARNING` row naming what
+    the check found (Q-B)."""
+    outcomes = {}
+    for fmt in ("dicom", "recorder"):
+        work = tmp_path / fmt
+        with _session(work) as session:
+            [instance] = [i for p in session.store.patients
+                          for st in p.studies for se in st.series
+                          for i in se.instances]
+            del instance.attributes["0028,0030"]  # Pixel Spacing, Type 1
+            instance.mark_modified()
+            try:
+                outcomes[fmt] = session.export(str(work / "out"), format=fmt)
+            except ExportError as error:
+                outcomes[fmt] = error
+        outcomes[fmt + "-rows"] = _rows(work / "s.db", "WARNING")
+    assert isinstance(outcomes["dicom"], ExportError)  # the premise
+    assert outcomes["recorder"].written_uids == [f"{ROOT}.1.1.1"]
+    iod = [d for d in outcomes["recorder-rows"]
+           if "does not conform to its IOD" in d]
+    assert len(iod) == 1 and "0028,0030" in iod[0], outcomes["recorder-rows"]
+
+
 def test_a_plugin_export_grades_pass(tmp_path):
     """Q7: no row says the plugin is not attested."""
     out = tmp_path / "out"
@@ -407,3 +556,64 @@ def test_register_refuses_a_built_in_class_under_another_name():
 
     with pytest.raises(TypeError, match="write"):
         exporters.register("dicom-again", DicomFormatExporter)
+
+
+@pytest.mark.parametrize("cls, name", [
+    (plugins.OptionNamedDataset, "dataset"),
+    (plugins.OptionNamedItem, "item")])
+def test_register_refuses_an_option_named_for_an_argument_of_write(
+        _registry, cls, name):
+    """Review of #1197: `write(dataset, item, folder, **options)` would get
+    the name twice, and every instance would fail in the worker."""
+    with pytest.raises(TypeError, match=f"'{name}'.*its own arguments"):
+        exporters.register("clash", cls)
+    assert "clash" not in exporters._REGISTRY
+
+
+_SCRIPT = '''\
+from isocenter import exporters
+
+{top}class InScript(exporters.Exporter):
+{indent}    def write(self, dataset, item, folder, **options):
+{indent}        return None
+
+
+if __name__ == "__main__":
+{guarded}    try:
+        exporters.register("in-script", InScript)
+    except TypeError as error:
+        print("REFUSED", error)
+    else:
+        print("REGISTERED")
+'''
+
+
+@pytest.mark.parametrize("guarded", [True, False],
+                         ids=["under-the-main-guard", "at-the-top"])
+def test_register_refuses_a_class_under_a_scripts_main_guard(
+        tmp_path, guarded):
+    """Review of #1197: a spawned worker imports the script under another
+    name, so the block under its main guard does not run there. A class
+    defined in it passed the pickle round trip in this process, and the
+    export then failed with `BrokenProcessPool`. The class at the top of
+    the same script is admitted: that is what makes the refusal a
+    judgement about the guard and not about scripts."""
+    import subprocess
+    import sys
+
+    if guarded:
+        text = _SCRIPT.format(
+            top="if __name__ == \"__main__\":\n    ", indent="    ",
+            guarded="")
+    else:
+        text = _SCRIPT.format(top="", indent="", guarded="")
+    script = tmp_path / "script.py"
+    script.write_text(text, encoding="utf-8")
+    done = subprocess.run([sys.executable, str(script)], cwd=str(tmp_path),
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    if guarded:
+        assert done.stdout.startswith("REFUSED"), done.stdout
+        assert "an export worker process could not import it" in done.stdout
+    else:
+        assert done.stdout.strip() == "REGISTERED", done.stdout

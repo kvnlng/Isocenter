@@ -3226,10 +3226,10 @@ def exported_patient_id(patient) -> str:
     instance copies. So the synthetic key, and the source Study Instance UID
     inside it, never reach an exported file or path.
 
-    A third-party exporter (`exporters.register`) calls this too, and never
-    writes `patient.patient_id`. The built-ins' write path, which applies
-    this rule for them, does not run for a plugin. This function is
-    documented but internal (tier 2), like the registry that it serves.
+    A plugin exporter (`exporters.register`) does not call it. Since 1.1
+    (#783) the export applies this rule before a plugin's `write` gets the
+    dataset, and `ExportItem.patient_id` holds what this function returns.
+    This function is documented but internal (tier 2).
 
     Args:
         patient (Patient): The patient being written.

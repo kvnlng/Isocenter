@@ -626,9 +626,15 @@ def test_a_format_a_page_registers_does_not_outlive_it(tmp_path, stops):
         "exporters.register('tutorial-toy', toy_exporter.Toy)\n```\n\n"
         "```python\n>>> 'tutorial-toy' in exporters.available_formats()\n"
         + ("False" if stops else "True") + "\n```\n"))
+    path_before = list(sys.path)
     failures = run_page(page, tmp_path, root=tmp_path)
     assert bool(failures) is stops, failures
     assert exporters.available_formats() == before
+    # The page put its folder on `sys.path` and imported a module from
+    # it. Both are undone, or the next page that writes a file of that
+    # name would import this page's copy (review of #1197).
+    assert sys.path == path_before
+    assert "toy_exporter" not in sys.modules
 
 
 def test_a_page_with_no_shown_output_is_red(tmp_path):
