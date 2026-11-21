@@ -322,7 +322,11 @@ it is. `anonymize()` resolves any other finding against the live graph
 at its `entity_uid` and `entity_path`. That finding then acts on the
 object found there, or declines when the address names no single
 object. When the value is already gone from the object at the finding's
-address, a removal is satisfied. `anonymize()` writes a Patient ID, and
+address, a removal is satisfied. When the end state that a finding asks
+for is already there, with the record that a remediation left it, the
+finding is satisfied too. A satisfied finding writes no row and is not
+counted, and no later finding on the same attribute runs in that pass.
+`anonymize()` writes a Patient ID, and
 shifts a date, only with a value that belongs to the live patient
 holding it.
 
