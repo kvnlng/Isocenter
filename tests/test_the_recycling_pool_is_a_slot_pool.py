@@ -517,9 +517,10 @@ def test_the_ingest_retry_pool_passes_disable_gc_to_the_helper():
 
     Killing mutation: the keyword dropped from that call.
     """
-    from isocenter import io_handlers  # pylint: disable=import-outside-toplevel
-    tree = ast.parse(pathlib.Path(io_handlers.__file__).read_text(
-        encoding="utf-8"))
+    # By path, beside `parallel.py`: an import of the module would put this
+    # file in its `TARGETS` row for one syntax-tree read.
+    source = pathlib.Path(parallel.__file__).with_name("io_handlers.py")
+    tree = ast.parse(source.read_text(encoding="utf-8"))
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
              and getattr(node.func, "id", getattr(node.func, "attr", None))
              == "new_spawn_process_pool"]

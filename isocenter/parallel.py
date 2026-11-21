@@ -906,8 +906,8 @@ _POOL_WATCH_S = 1.0
 #: Two, measured: at one, `export()` ran 7-8% slower than
 #: `multiprocessing.Pool`, because a worker sat idle for the round trip
 #: between returning a result and being handed the next task. Do not raise
-#: it without measuring: a worker that dies loses every chunk it holds, and
-#: #668's isolation must run each of them again.
+#: it without measuring: a worker that dies loses every chunk it holds,
+#: and the isolation of #668 must run each of them again.
 _SLOT_DEPTH = 2
 
 
