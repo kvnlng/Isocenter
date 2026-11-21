@@ -46,7 +46,7 @@ Pixel redaction loads full arrays and is the most memory-intensive step. It runs
 
 On a free-threaded interpreter, the same dispatcher uses threads instead, because there is no GIL to escape. On a `:memory:` store it always uses threads, because a process cannot share an in-memory database. The worker count, chunk size, and strategy are set by the environment variables in [Environment Variables](environment.md).
 
-Export is the exception. It always runs in processes and recycles each worker after 25 tasks, on every interpreter. The reason is that the imaging C libraries leak, and a thread has no process to recycle. That bounds any growth inside an export worker to 25 tasks, and it is why `ISOCENTER_FORCE_THREADS` does not reach `export()`.
+Export is the exception. It always runs in processes and recycles each worker after 25 tasks, on every interpreter. The reason is that the imaging C libraries leak, and a thread has no process to recycle. That bounds any growth inside an export worker to 25 tasks, and it is why `ISOCENTER_FORCE_THREADS` does not reach `export()`. While a worker that has run its 25 tasks exits, its replacement can already be running, so an export can briefly hold about twice `ISOCENTER_MAX_WORKERS` worker processes (#885).
 
 ### Ingest streams results into the index
 
