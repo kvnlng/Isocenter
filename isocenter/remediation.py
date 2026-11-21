@@ -1790,11 +1790,17 @@ class RemediationService:
             from .privacy import _owned_uid_is_open  # pylint: disable=import-outside-toplevel
             before = self._status_revisions_at_start
             for series, _ in self._series_at_start:
-                # A satisfied stamp still pending is one this pass recorded,
-                # though its revision has not moved yet (#989).
+                # A satisfied stamp still pending counts as one this pass
+                # recorded, though its revision has not moved yet (#989) --
+                # but only where it would change the status: on an instance
+                # already reading REMEDIATED the stamp records nothing, as
+                # it short-circuited when it landed at once, and a status
+                # recorded before the pass is not this pass's to change.
                 stamped = [instance for instance in series.instances
                            if getattr(instance, "_phi_status_revision", None)
-                           != before.get(id(instance)) or id(instance) in pending]
+                           != before.get(id(instance))
+                           or (id(instance) in pending
+                               and instance.phi_status is not PhiStatus.REMEDIATED)]
                 if stamped and _owned_uid_is_open(
                         self._series_policy, "0020,000e",
                         getattr(series, "series_instance_uid", None),

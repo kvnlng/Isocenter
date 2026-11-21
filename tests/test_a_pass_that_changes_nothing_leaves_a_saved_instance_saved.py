@@ -114,6 +114,41 @@ def test_a_direct_apply_single_remediation_still_stamps_a_satisfied_entity():
     assert instance.phi_status is PhiStatus.REMEDIATED
 
 
+def test_the_live_series_arm_leaves_an_instance_whose_status_the_pass_did_not_change(tmp_path):
+    """The other side of the guard below (#750): an instance that already
+    reads REMEDIATED, whose findings this pass are all satisfied, has no
+    status recorded by this pass, so an open Series does not demote it.
+    The first pass runs under a KEEP on the Series Instance UID, so the
+    instances end REMEDIATED with the Series' source UID; the reopened
+    session runs under the floor, where that Series is open."""
+    write_ct(tmp_path / "src" / "a.dcm", "PID-989K", 9891, name="Alpha^One")
+    keep = tmp_path / "keep.yaml"
+    keep.write_text("phi_tags:\n  '0020,000e': {action: KEEP}\n")
+    floor = tmp_path / "floor.yaml"
+    floor.write_text("phi_tags: {}\n")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session, tmp_path, FIXED_A)
+        session.load_config(str(keep))
+        session.ingest(str(tmp_path / "src"))
+        report = session.audit()
+        session.anonymize(report)
+        assert _instance(session).phi_status is PhiStatus.REMEDIATED
+        session.save(sync=True)
+    findings = [f for f in report.findings if f.entity_type == "Instance"
+                and f.tag not in OWNER_STAMPED]
+    with DicomSession(str(tmp_path / "s.db")) as second:
+        second.load_config(str(floor))
+        instance = _instance(second)
+        assert instance.phi_status is PhiStatus.REMEDIATED
+        series = second.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid.startswith("1.2.826.0.1.3680043.10.9999.")
+
+        assert second.anonymize(findings) == 0
+
+        assert instance.phi_status is PhiStatus.REMEDIATED
+        assert not instance.has_unsaved_changes
+
+
 def test_the_live_series_arm_still_demotes_an_instance_only_satisfied_this_pass(tmp_path):
     """R2-1's shape: a reopened store, a plain list that holds neither the
     Series' finding nor any owner-stamped copy, so the instance's only
