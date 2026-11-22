@@ -1982,15 +1982,25 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     try:
         if int(ds.PixelRepresentation) != 0:
             return None
+        signed = None
         for frame in _declared_frames(ds):
             layout = _j2k_sample_layout(frame)
             if layout is not None and layout[0]:
-                return signed_codestream_words(layout[1])
+                signed = signed_codestream_words(layout[1])
+                break
     except Exception:  # pylint: disable=broad-except
         # Not this gate's refusal to make: see the comment at the top of
         # this function (the decoder that runs next refuses it).
         return None
-    return None
+    # **Withheld only where pydicom refuses the header** (#1085), so its
+    # sentence naming the element is the one given, as for the 1-bit and
+    # ragged refusals; the decode that follows raises it. **Not where it
+    # could not be asked** (`HEADER_UNASKED`): those two lose only their
+    # wording then, but withholding this one would hand the file to
+    # Pillow, which shifts its samples with no error. Fail closed.
+    if signed is not None and _header_verdict(ds) == HEADER_REFUSED:
+        return None
+    return signed
 
 
 def _decode_frame(transfer_syntax, bitstream, ds, beyond=None):
