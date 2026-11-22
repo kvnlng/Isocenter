@@ -1412,6 +1412,13 @@ class _SlotPool:
         death, Ctrl-C. SIGTERM every worker, wait at most
         `_BROKEN_POOL_GRACE_S`, SIGKILL each one still running and name
         them in one WARNING, then shut every executor down."""
+        # Nothing left to end: return before anything else is read. The
+        # interpreter-exit hook (`_end_open_slot_pools`) ends an open pool,
+        # and the stream's own `finally` then runs this again during module
+        # teardown, when this module's globals (`time` among them) may
+        # already be None (review of #1199, finding 3).
+        if not self._live and not self._retiring:
+            return
         processes = [self._process_of(s) for s in self._live]
         processes += [p for p, _ in self._retiring]
         # A worker whose spawn was interrupted may be in `_processes`

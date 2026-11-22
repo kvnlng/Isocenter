@@ -861,12 +861,15 @@ def test_a_result_returned_before_a_refused_submit_is_delivered_before_it(
     assert len(made) == 2
 
 
-_LEFT_OPEN_AT_EXIT = '''
-import sys
+# The task and the initializer live in a module of their own, as a real
+# script's would: a function defined in `__main__` holds `__main__`'s
+# globals, which puts the stream in a cycle that is collected before the
+# modules are cleared. With none, the stream's `finally` runs during module
+# teardown, after `parallel`'s globals are None, which is where the
+# "Exception ignored" of the review of #1199 (finding 3) was printed.
+_LEFT_OPEN_TASKS = '''
 import threading
 import time
-
-from isocenter import parallel
 
 
 def stay():
@@ -878,14 +881,29 @@ def stay():
 def slow(seconds):
     time.sleep(seconds)
     return seconds
+'''
 
+_LEFT_OPEN_AT_EXIT = '''
+import os
+import signal
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from isocenter import parallel
+import left_open_tasks
 
 if __name__ == "__main__":
+    # A runner may start the test with SIGINT ignored, and a child inherits
+    # that; the interrupt case needs Python's own handler.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
     parallel._BROKEN_POOL_GRACE_S = 1.0
-    parallel.resolve_worker_initializer = lambda disable_gc=False: stay
+    parallel.resolve_worker_initializer = (
+        lambda disable_gc=False: left_open_tasks.stay)
     STREAM = parallel.run_parallel(
-        slow, [0.0] + [3600.0] * 3, max_workers=2, maxtasksperchild=25,
-        show_progress=False, return_generator=True)
+        left_open_tasks.slow, [0.0] + [3600.0] * 7, max_workers=4,
+        maxtasksperchild=25, show_progress=False, return_generator=True)
     print("first", next(STREAM), flush=True)
     if sys.argv[1] == "interrupt":
         # The parent's own work on a result: a Ctrl-C lands here, in the
@@ -908,9 +926,16 @@ def test_an_interpreter_exit_with_a_stream_left_open_ends_its_workers(
     must run first. This runs a real interpreter exit, so the order of the
     two hooks is measured on each interpreter the gate runs.
 
+    The stream's own `finally` then runs again during module teardown and
+    must find nothing left to end; it printed "Exception ignored ...
+    'NoneType' object has no attribute 'monotonic'" (finding 3).
+
     Killing mutations: the hook not registered; registered with `atexit`
-    (which runs after the joins); the pool never added to the set.
+    (which runs after the joins); the pool never added to the set; the
+    second unfinished exit not a no-op.
     """
+    (tmp_path / "left_open_tasks.py").write_text(_LEFT_OPEN_TASKS,
+                                                 encoding="utf-8")
     script = tmp_path / "left_open.py"
     script.write_text(_LEFT_OPEN_AT_EXIT, encoding="utf-8")
     env = {k: v for k, v in os.environ.items()
