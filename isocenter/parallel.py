@@ -5,17 +5,17 @@ goes through -- scanning, exporting, verification. It picks between three
 execution strategies and adapts to a set of `ISOCENTER_*` environment
 variables, so that tuning a cohort run never means editing code.
 """
-import collections
 import concurrent.futures
 import functools
+import itertools
 import os
 import signal
 import sys
 import multiprocessing
 import multiprocessing.connection
-import multiprocessing.pool
 import threading
 import time
+import weakref
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import (Callable, Iterable, Iterator, Any, NamedTuple,
@@ -40,18 +40,15 @@ _FALSEY = ("0", "false", "off", "no")
 _WORKER_FAULTHANDLER_TIMEOUT_S = 240
 
 #: How long a worker process may take to end once its exit has begun,
-#: before the kernel ends it with SIGALRM (#888, #844). No environment
-#: variable: tests patch it. Resolved in the parent and handed to the
-#: worker as an argument, so a patched value reaches a spawned child.
+#: before the kernel ends it with SIGALRM (#844). No environment variable:
+#: tests patch it. Resolved in the parent and handed to the worker as an
+#: argument, so a patched value reaches a spawned child.
 #:
-#: Armed by a recycling-pool worker once it leaves its task loop, however
-#: it left: at its quota, by the pool's sentinel on `close()`, or on
-#: `terminate()`. So it must be at least `_BROKEN_POOL_GRACE_S +
-#: _POOL_EXIT_AFTER_KILL_S`: inside #860's bounded exit the parent's own
-#: kill then always acts first, and that exit's WARNING lines are
-#: unchanged. Below conftest's `_STALL_S`, pytest's faulthandler window and
-#: `_WORKER_FAULTHANDLER_TIMEOUT_S`. `test_packaging_contract.py` pins all
-#: of it.
+#: Armed only under `ISOCENTER_WORKER_FAULTHANDLER=1`, by the `atexit` that
+#: `_worker_init` registers. The recycling pool's workers armed it at their
+#: quota too until #885 (#888); the parent now ends one that cannot leave.
+#: Below conftest's `_STALL_S`, pytest's faulthandler window and
+#: `_WORKER_FAULTHANDLER_TIMEOUT_S`. `test_packaging_contract.py` pins it.
 _WORKER_EXIT_GRACE_S = 15.0
 
 
@@ -158,9 +155,8 @@ def resolve_worker_initializer(disable_gc: bool = False):
     # Resolved in the parent so the child obeys what the parent decided
     # rather than re-reading environment or module state after a spawn;
     # that is also what makes `_WORKER_FAULTHANDLER_TIMEOUT_S` patchable in
-    # tests. `Session._executor` and `_Strategy.worker_initializer` both go
-    # through here, so the two kinds of pool agree on what a worker runs
-    # first.
+    # tests. `new_spawn_process_pool` calls it for every process pool in
+    # the package (#667), so every pool agrees on what a worker runs first.
     disable_gc = disable_gc or _env_is("ISOCENTER_DISABLE_GC", ("1",))
     faulthandler_timeout = (
         _WORKER_FAULTHANDLER_TIMEOUT_S
@@ -518,9 +514,8 @@ def _resolve_execution_choice(
     Returns:
         _Choice: The decision and its attribution.
     """
-    # Recycling beats threads because on 3.12 only `multiprocessing.Pool`
-    # recycles workers: `ProcessPoolExecutor`'s `max_tasks_per_child`
-    # deadlocks `map` there at the first replacement. The whole precedence
+    # Recycling beats threads because recycling replaces a worker process,
+    # which a thread is not (`_SlotPool`, #885). The whole precedence
     # lives here; nothing else may read these variables to decide, or there
     # are two copies of the order.
     #
@@ -605,8 +600,8 @@ def _announce_recycling_override(strategy: _Strategy) -> None:
     # a long run.
     get_logger().warning(
         "%s was set, but worker recycling (maxtasksperchild=%s) "
-        "was also asked for and only multiprocessing.Pool "
-        "implements it, so this run uses processes. "
+        "was also asked for, and recycling replaces worker "
+        "processes, so this run uses processes. "
         "session.export() always sets maxtasksperchild=25, so it "
         "runs in processes on every interpreter including "
         "free-threaded builds; for audit(), scan_pixel_content() "
@@ -771,7 +766,7 @@ def _run_on_shared_executor(executor, func, items, strategy):
     """Uses an executor the caller owns, and does not shut it down.
 
     Args:
-        executor: A `concurrent.futures` executor, or a
+        executor: A `concurrent.futures` executor, or a caller's
             `multiprocessing.Pool` (whose `imap` is used).
         func: The worker function.
         items: The items to process.
@@ -812,27 +807,13 @@ def _run_on_shared_executor(executor, func, items, strategy):
         _end_broken_pool_stragglers(executor)
 
 
-#: How long the recycling pool's exit waits, once every worker has been
-#: SIGKILLed, for the stdlib's own exit to finish on its helper thread
-#: before it lets the caller go and leaves that thread behind (#860). No
-#: environment variable: tests patch it.
-#:
-#: A killed worker ends at once, so this is only ever used up when the
-#: helper is stuck in `Pool._help_stuff_finish`, acquiring the inqueue's
-#: read lock, which a killed worker can hold for good: the kernel does not
-#: release a POSIX semaphore. Together with the grace it bounds the exit at
-#: `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`, below conftest's
-#: `_STALL_S` and pytest's faulthandler window, so a bounded exit is never
-#: reported as a stall or dumped. `test_packaging_contract.py` pins that.
-_POOL_EXIT_AFTER_KILL_S = 5.0
-
-
 def _still_running(processes) -> list:
     """The processes of `processes` whose sentinel is not ready.
 
     The sentinels, never `join()` or `is_alive()`: those reap the child
-    with `waitpid`, racing the helper thread's own `join()` of it (#861's
-    rule). A process object already closed has nothing to end.
+    with `waitpid`, racing an executor's manager thread, which joins the
+    same process (#861's rule). A process object already closed has
+    nothing to end.
     """
     waiting = {}
     for process in processes:
@@ -867,7 +848,9 @@ def _kill_each(processes) -> list[int]:
     for process in processes:
         try:
             process.kill()
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttributeError):
+            # AttributeError: a process object not yet started has no
+            # `_popen` to signal, and nothing to end.
             continue
         killed.append(process.pid)
     return killed
@@ -891,414 +874,669 @@ def _kill_still_running(processes) -> list[int]:
     return _kill_each(targets)
 
 
-def _end_recycling_pool(pool, finished: bool) -> list[int]:
-    """End a recycling `multiprocessing.Pool`, holding the caller no longer
-    than `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`.
-
-    The stdlib's exit can wait for good. `terminate()`, which is what a
-    `with` block's exit is, first takes the inqueue's read lock and never
-    gives it back, so a worker not yet waiting for work (one still booting,
-    or a recycled replacement) can never read its sentinel; then it SIGTERMs
-    each worker and joins every one with no timeout. A worker that also
-    outlives SIGTERM (a handler a script installs at module level runs again
-    in every spawned worker; coverage's `sigterm = True`, set here
-    until #886, can deadlock) hung
-    `export()` for good after every file was written (#860).
-
-    So the stdlib's whole exit runs on a daemon helper thread: on success,
-    `close()` here and then `join()` and `terminate()` there, so every
-    worker leaves by its sentinel and its own exit work, `atexit` included,
-    runs; otherwise `terminate()` there. The caller waits for it at most
-    `_BROKEN_POOL_GRACE_S`, SIGKILLs every worker still running, logs one
-    WARNING naming them, and waits at most `_POOL_EXIT_AFTER_KILL_S` more.
-    A helper still stuck then is left behind, with a second WARNING. An
-    interrupt during the grace, such as Ctrl-C, kills at once and goes on.
-    Takes no lock.
-
-    Args:
-        pool: The `multiprocessing.Pool` `_run_on_recycling_pool` built.
-        finished (bool): Whether every result was read. False on any other
-            way out: a reader that stops, a task's exception, Ctrl-C.
-
-    Returns:
-        list[int]: The pids it sent SIGKILL, or `[]`.
-    """
-    # Four rules here are traps someone would tidy away:
-    #
-    # 1. Never `terminate()` or `join()` on the caller's thread, and never
-    #    let the pool be collected there before the helper has run its
-    #    `terminate()`. Both can block where SIGKILL does not reach: a
-    #    worker killed while it held the inqueue's read lock leaves it held
-    #    for good, and `_help_stuff_finish` acquires it. A pool's finalizer
-    #    is `_terminate_pool` too, so a pool only closed and joined would
-    #    run `_help_stuff_finish` on whatever thread dropped it. The
-    #    helper's trailing `terminate()` consumes the finalizer on the
-    #    helper: `util.Finalize` deletes its registry entry before it calls
-    #    back, so it runs once.
-    # 2. Never kill while the pool is RUN: the worker handler replaces the
-    #    dead, and the replacements starve behind the lock a dead worker
-    #    held. On success `close()` is called here, before the helper
-    #    starts (it only sets the state and posts a wakeup; it does not
-    #    block), so a Ctrl-C at any later instant finds the pool closed. On
-    #    the other ways out the state changes only when the helper's
-    #    `terminate()` runs, which blocks and so cannot run here; a Ctrl-C
-    #    in the instant before it can kill under RUN, and the after-kill
-    #    bound covers what that can leave stuck.
-    # 3. Wait on an `Event`, never `Thread.join()` and `is_alive()`. On
-    #    3.12 a `KeyboardInterrupt` inside `join()` runs bpo-45274's
-    #    handler, which marks a thread that is still running as stopped:
-    #    `is_alive()` then says False, nothing is killed, and the
-    #    interpreter's exit joins the worker for good (measured).
-    # 4. The kill in a `finally`, never an `except`, and no `return` in it:
-    #    Ctrl-C is raised inside the wait, and must kill and still reach
-    #    the caller (#861, round 2). The log line comes after the kill
-    #    loop, and nothing here takes a lock.
-    #
-    # A residual, named so nobody mistakes it for covered: a Ctrl-C that
-    # lands before the `try` below (from the `finally` in
-    # `_run_on_recycling_pool` through `close()` and building the helper)
-    # escapes with no helper started and nothing killed. The pool is then
-    # left to its finalizer, which is `_terminate_pool`, the unbounded
-    # SIGTERM-and-join this function exists to avoid. The window is
-    # microseconds against a 10 s grace, and moving those lines inside the
-    # `try` would only move it, not close it (review of #884, finding 2).
-    if finished:
-        pool.close()
-    started = time.monotonic()
-    exited = threading.Event()
-    failure = []
-
-    def stdlib_exit():
+def _wait_for_sentinels(processes, deadline) -> None:
+    """Wait until every one of `processes` has ended, or until `deadline`
+    (a `time.monotonic()` value). Raises nothing of its own: a handle that
+    cannot be asked ends the wait, and the caller's kill decides."""
+    waiting = {}
+    for process in processes:
         try:
-            if finished:
-                pool.join()
-            pool.terminate()
-        except BaseException as exc:  # pylint: disable=broad-exception-caught
-            # Kept to log, so a helper that raises does not read as a hang.
-            failure.append(exc)
-        finally:
-            exited.set()
-
-    helper = threading.Thread(target=stdlib_exit, name="isocenter-pool-exit",
-                              daemon=True)
-    killed = []
-    try:
-        # The start inside the `try`: `start()` itself waits for the thread
-        # to run, and a Ctrl-C landing there, or between it and the wait,
-        # must kill as one landing in the wait does.
-        helper.start()
-        exited.wait(_BROKEN_POOL_GRACE_S)
-    finally:
-        if not exited.is_set():
-            # The live list, read only now: nothing grows it once the pool
-            # is closed or terminating.
-            killed = _kill_still_running(list(pool._pool))
-            if killed:
-                # The time measured, not the grace: an interrupt ends the
-                # wait early. The cause by path: a finished pool is closed
-                # and joined, and no signal is sent, so a worker still
-                # running failed to leave by its sentinel; only the other
-                # ways out go through `terminate()`'s SIGTERM (review of
-                # #884, finding 1).
-                cause = (
-                    "A worker cannot leave by its sentinel when its exit "
-                    "does not finish: a non-daemon thread still running, "
-                    "or an exit handler that does not return."
-                    if finished else
-                    "A worker outlives SIGTERM when something in it "
-                    "handles that signal; a handler a script installs at "
-                    "module level runs again in every spawned worker.")
-                get_logger().warning(
-                    "%d worker process(es) of the recycling pool were still "
-                    "running %.1f s after the pool was told to stop, and were "
-                    "sent SIGKILL (pid %s). %s",
-                    len(killed), time.monotonic() - started,
-                    ", ".join(str(pid) for pid in killed), cause)
-    # After the `finally`, so an interrupt skips it and goes on.
-    if not exited.wait(_POOL_EXIT_AFTER_KILL_S):
-        get_logger().warning(
-            "The recycling pool's exit had not finished %.1f s after the "
-            "pool was told to stop, and was left to a daemon thread "
-            "(isocenter-pool-exit). A killed worker can leave a lock of the "
-            "pool held, which its exit then waits on for good.",
-            time.monotonic() - started)
-    elif failure:
-        get_logger().warning("The recycling pool's exit raised: %r",
-                             failure[0])
-    return killed
+            waiting[process.sentinel] = process
+        except ValueError:
+            continue
+    while waiting:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        try:
+            ready = multiprocessing.connection.wait(list(waiting),
+                                                    timeout=left)
+        except (OSError, ValueError):
+            return
+        for sentinel in ready:
+            del waiting[sentinel]
 
 
-#: How often the recycling pool's stream checks its workers while it waits
-#: for a result, and at most how often while results flow (#887). It is
-#: the latency of seeing a dead worker; it costs nothing while results
-#: flow, and a check is one zero-timeout `select()` over the sentinels of
-#: the workers still running, at most about twice the pool's width. No
+#: How often the recycling pool's stream wakes while it waits for a result,
+#: to look at workers that hold no task and at workers it has told to leave
+#: (#887, #885). It is the latency of seeing an idle worker die; a busy
+#: worker's death is seen at once, through its task's future. No
 #: environment variable: tests patch it.
 _POOL_WATCH_S = 1.0
 
+#: How many chunks one worker of the recycling pool holds at a time (#885).
+#: Two, measured: at one, `export()` ran 7-8% slower than
+#: `multiprocessing.Pool`, because a worker sat idle for the round trip
+#: between returning a result and being handed the next task. Do not raise
+#: it without measuring: a worker that dies loses every chunk it holds,
+#: and the isolation of #668 must run each of them again.
+_SLOT_DEPTH = 2
 
-def _recycling_worker(inqueue, outqueue, initializer, initargs, maxtasks,
-                      wrap_exception, exit_grace):
-    """`multiprocessing.pool.worker`, then a bound on this process's exit.
 
-    The target of every worker `_RecyclingPool` starts. Module scope: it
-    pickles into the spawned child by reference.
+def new_spawn_process_pool(max_workers, *, disable_gc=False):
+    """The one place a spawned `ProcessPoolExecutor` is built (#667).
+
+    The session's shared pool and its rebuilds, `ingest()`'s retry pools,
+    `run_parallel`'s own process pool and every worker of the recycling
+    pool come from here, so all of them start their workers the same way
+    and run the same initializer.
 
     Args:
-        inqueue, outqueue, initializer, initargs, maxtasks, wrap_exception:
-            `multiprocessing.pool.worker`'s own arguments, passed on.
-        exit_grace (float): Seconds this process may take to end once the
-            loop has returned (#888), resolved in the parent.
+        max_workers (int): The pool's width.
+        disable_gc (bool): Disable the garbage collector in each worker
+            (`ISOCENTER_DISABLE_GC=1` does too).
+
+    Returns:
+        concurrent.futures.ProcessPoolExecutor: The pool, with no worker
+        started yet.
     """
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
-    multiprocessing.pool.worker(inqueue, outqueue, initializer, initargs,
-                                maxtasks, wrap_exception)
-    # A worker that ran its quota leaves the loop and exits, and the pool
-    # replaces it only once it has ended; one whose exit does not finish (a
-    # non-daemon thread, an `atexit` that never returns) was never replaced,
-    # and with every worker so, the pool stalled with tasks queued (#888).
+    # Spawn, not fork (#220, #250): a forked worker inherits the parent's
+    # open SQLite handles and its sidecar file position. The platform
+    # default is fork on Linux 3.12, where a forked worker's
+    # `persist_pixel_data` stalled on `database is locked`; macOS spawns by
+    # default, so a local run does not show the difference, and
+    # `test_parallel_contract.py` pins the argument.
     #
-    # Ending it here does not break #860's rule 2 (never kill while the
-    # pool is RUN, because the replacements starve behind a lock the dead
-    # held): the loop returned after its last `put` released the outqueue's
-    # write lock and without calling `get` again, so this process holds
-    # none of the pool's locks. A worker #860 kills, or one #887 sees die,
-    # can die inside either lock, which is why those paths keep their rules.
-    # Armed however the loop ended, since the worker cannot tell why: hence
-    # `_WORKER_EXIT_GRACE_S` sits above #860's own exit bound.
-    _arm_exit_bound(exit_grace)
+    # `concurrent.futures.ProcessPoolExecutor` is read by attribute at call
+    # time, and `resolve_worker_initializer` through this module's global:
+    # tests replace both, and a patch of `parallel.resolve_worker_initializer`
+    # reaches every process pool in the package through here.
+    #
+    # Never pass `max_tasks_per_child`: it deadlocks `map` on 3.12, the
+    # floor, the first time a worker is replaced (measured). Recycling is
+    # `_SlotPool`'s, by replacing whole one-worker pools.
+    return concurrent.futures.ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=resolve_worker_initializer(disable_gc))
 
 
-class _RecyclingPool(multiprocessing.pool.Pool):  # pylint: disable=abstract-method
-    """`multiprocessing.Pool` that records every worker it starts, and starts
-    each as `_recycling_worker`, so its exit is bounded (#887, #888).
+def _run_chunk(func, chunk) -> list:
+    """Run `func` on each item of `chunk`, in a worker of the recycling pool.
+
+    Module scope: it pickles into the spawned child by reference.
+    """
+    return [func(item) for item in chunk]
+
+
+class _Slot:  # pylint: disable=too-few-public-methods
+    """One one-worker executor of `_SlotPool`, and what it holds."""
+
+    __slots__ = ("executor", "process", "given", "inflight", "shut")
+
+    def __init__(self, executor):
+        self.executor = executor
+        # The worker's process, captured once the first `submit()` has
+        # spawned it: `shutdown()` sets the executor's `_processes` to None,
+        # so a handle read later is no handle at all.
+        self.process = None
+        self.given = 0           # chunks handed to this worker, ever
+        self.inflight = {}       # future -> (sequence, first index, chunk)
+        self.shut = False        # `shutdown()` already called
+
+
+class _SlotPool:
+    """The recycling pool: one-worker spawned executors, each replaced after
+    `recycle_after` chunks (#885).
+
+    At most `width` workers run tasks at once, each holding at most
+    `depth` chunks. A worker that has been handed `recycle_after` chunks
+    takes no more; when its last one returns it is told to leave, and the
+    next chunk opens a new worker. A worker told to leave that is still
+    running `_BROKEN_POOL_GRACE_S` later is sent SIGKILL and named in one
+    WARNING. A worker that dies while the pool runs fails the stream with
+    `BrokenProcessPool`, after the results already delivered, and the
+    exception's `lost` attribute names the chunks it held.
 
     Args:
-        exit_grace (float): Keyword-only: each worker's exit bound.
-        *args: `multiprocessing.pool.Pool`'s.
-        **kwargs: `multiprocessing.pool.Pool`'s.
-    """
-    # The hook is `Pool.Process`: `__init__` starts the first workers
-    # through `self.Process`, and hands `self.Process` to the worker-handler
-    # thread, which starts every replacement. A bound method holds the pool,
-    # so that thread keeps it alive until it exits; nothing here relies on
-    # the pool being collected, because `_end_recycling_pool`'s helper runs
-    # `terminate()` itself (#860's rule 1).
-
-    def __init__(self, *args, exit_grace, **kwargs):
-        # Before `super().__init__()`, which starts the first workers
-        # through `self.Process`: set after it, these do not exist yet when
-        # those workers start.
-        # `deque` because the worker-handler thread appends and the stream's
-        # thread pops; both are atomic.
-        self._started = collections.deque()
-        self._exit_grace = exit_grace
-        super().__init__(*args, **kwargs)
-
-    # An instance method where the base class has a staticmethod, so it sees
-    # the pool: hence `arguments-differ`, which counts `self`.
-    def Process(self, ctx, *args, **kwds):  # pylint: disable=invalid-name,arguments-differ
-        """Start one worker, as `_recycling_worker`, and record it.
-
-        A target other than `multiprocessing.pool.worker` passes through
-        unbounded; `test_parallel_contract.py` pins that the stdlib's target
-        is that one.
-
-        Args:
-            ctx: The pool's multiprocessing context.
-            *args: `ctx.Process`'s.
-            **kwds: `ctx.Process`'s.
-
-        Returns:
-            multiprocessing.process.BaseProcess: The worker, not yet started.
-        """
-        if kwds.get("target") is multiprocessing.pool.worker:
-            kwds["target"] = _recycling_worker
-            kwds["args"] = tuple(kwds.get("args", ())) + (self._exit_grace,)
-        process = ctx.Process(*args, **kwds)
-        self._started.append(process)
-        return process
-
-
-class _RecyclingWatch:
-    """Reads how each worker of a `_RecyclingPool` ended (#887, #888).
-
-    `check()` raises `BrokenProcessPool` on a worker that ended abnormally,
-    and both it and `sweep()` log the workers their exit bound ended.
-    """
-
-    def __init__(self, pool):
-        self._pool = pool
-        # The processes still running, or just ended and not yet read. Only
-        # those: each process held keeps its sentinel's file descriptor
-        # open, so holding every worker of a long export would hold
-        # thousands. A process is dropped once its exit code is read.
-        self._live = []
-        self._next = time.monotonic() + _POOL_WATCH_S
-
-    def due(self) -> bool:
-        """Whether `_POOL_WATCH_S` has passed since the last check."""
-        return time.monotonic() >= self._next
-
-    def _read(self):
-        """Read every worker that has ended since the last read.
-
-        Returns:
-            tuple: `(broken, late)`: the first abnormal `(pid, exitcode)` or
-            None, and the pids the exit bound ended.
-        """
-        started = self._pool._started  # pylint: disable=protected-access
-        while True:
-            try:
-                self._live.append(started.popleft())
-            except IndexError:
-                break
-        keep = []
-        waiting = {}
-        for process in self._live:
-            try:
-                waiting[process.sentinel] = process
-            except ValueError:
-                # Recorded before `start()`: no sentinel yet. Kept, and read
-                # at the next check; dropping it would leave it unwatched.
-                keep.append(process)
-        ready = (set(multiprocessing.connection.wait(list(waiting), timeout=0))
-                 if waiting else set())
-        broken, late = None, []
-        for sentinel, process in waiting.items():
-            if sentinel not in ready:
-                keep.append(process)
-                continue
-            # `exitcode` and not `join()` or `is_alive()` (#861's rule): it is
-            # read only once the sentinel is ready, so the process has ended,
-            # and it is `Popen.poll(WNOHANG)`, which never blocks. When the
-            # worker handler's `_join_exited_workers` reaped it first,
-            # `poll` catches ECHILD and returns None; the `Popen` is the one
-            # the handler holds, so its `returncode` is cached for both, and
-            # the race costs one re-read at the next check, never a wrong
-            # answer. `test_parallel_contract.py` pins the None.
-            code = process.exitcode
-            if code is None:
-                keep.append(process)
-            elif code == -signal.SIGALRM:
-                late.append(process.pid)
-            elif code != 0 and broken is None:
-                # 0 is a worker that left at its quota or by its sentinel.
-                broken = (process.pid, code)
-        self._live = keep
-        return broken, late
-
-    def _report(self, late):
-        if not late:
-            return
-        # The bound, not a measurement: the parent does not see when the
-        # worker's loop ended, so nothing here can time it. Do not "fix" it
-        # into a measured time. A log line and no audit row, as #860's
-        # ruling Q3 has for a kill: the worker had sent every result. Its
-        # words must not include "recycling pool" or "SIGKILL", by which
-        # tests count #860's lines.
-        get_logger().warning(
-            "%d worker process(es) had finished their tasks but were still "
-            "running %.1f s later, and were ended by their own exit bound "
-            "(SIGALRM) (pid %s). A worker cannot end while a non-daemon "
-            "thread is still running or an exit handler does not return; a "
-            "pool that recycles its workers replaces it only once it has "
-            "ended.",
-            len(late), self._pool._exit_grace,  # pylint: disable=protected-access
-            ", ".join(str(pid) for pid in late))
-
-    def check(self):
-        """Read the workers; raise if one ended abnormally.
-
-        Raises:
-            BrokenProcessPool: A worker ended with a nonzero exit code or a
-                signal other than its exit bound's.
-        """
-        self._next = time.monotonic() + _POOL_WATCH_S
-        broken, late = self._read()
-        self._report(late)
-        if broken is not None:
-            # Any death, not only one mid-task (owner ruling Q1 on #887): an
-            # idle worker always holds the inqueue's read lock while it
-            # waits for work (measured, #860), and one killed while sending
-            # can hold the outqueue's write lock, so no death can be judged
-            # harmless. Its words must not include "recycling pool" or
-            # "SIGKILL", by which tests count #860's lines.
-            raise BrokenProcessPool(
-                f"A worker process of a pool that recycles its workers ended "
-                f"abruptly (pid {broken[0]}, exit code {broken[1]}) while the "
-                f"pool was running; the task it held, if any, cannot finish, "
-                f"and a worker that ends while it holds one of the pool's "
-                f"locks stops every other worker, so the pool was stopped.")
-
-    def sweep(self):
-        """After the pool's exit, log the workers their bound ended that no
-        check saw. Raises nothing: the stream is over."""
-        # Required: a worker that reaches its quota just before the stream
-        # ends has its bound fire inside #860's exit, where no check runs.
-        # A -SIGKILL here is the parent's own kill and a -SIGTERM is
-        # `terminate()`'s, so the abnormal half is not read.
-        _, late = self._read()
-        self._report(late)
-
-
-def _watched(iterator, watch):
-    """Yields from a pool's result iterator, checking its workers while it
-    waits (#887).
-
-    Args:
-        iterator: `Pool.imap`'s or `imap_unordered`'s iterator.
-        watch (_RecyclingWatch): The pool's watch.
-
-    Yields:
-        Each result. A task's own exception propagates as before.
+        width (int): How many workers run at once.
+        recycle_after (Optional[int]): Chunks per worker; None never
+            replaces one.
+        disable_gc (bool): Disable the collector in each worker.
+        depth (int): Chunks one worker holds at a time.
 
     Raises:
-        BrokenProcessPool: From `watch.check()`, once every result already
-            delivered has been yielded.
+        ValueError: `width` or `depth` below 1, or `recycle_after` neither
+            None nor a positive int.
     """
-    # `next(timeout=)` wakes on a timer with no second thread. Without it
-    # the read waits for good on the task a dead worker held: the worker
-    # handler replaces the dead worker and records nothing about its task.
-    while True:
+    # Why one-worker executors, each its own pool, and not something
+    # tidier. Each of these is a trap someone would "simplify" back:
+    #
+    # 1. Not `multiprocessing.Pool`. A worker killed while it waited for
+    #    work left the inqueue's read lock held for good, and the pool's
+    #    exit then waited on it (#885: 19 s and a thread left behind).
+    # 2. Not one W-wide executor replaced every W*N tasks, as #885 first
+    #    proposed. It ends only when its slowest task ends, so every other
+    #    worker idles behind it (+66% measured with 1% of tasks at 2 s). And
+    #    a W-wide executor that loses a worker SIGTERMs and joins the others
+    #    while it holds the lock the next `submit()` takes (the #796/#861
+    #    shape). A one-worker executor has no sibling to join, so that
+    #    shape cannot occur in it: the one worker is what removes it, not a
+    #    different spelling of the same pool.
+    # 3. Not `ProcessPoolExecutor(max_tasks_per_child=)`: it deadlocks
+    #    `map` on 3.12 at the first replacement (measured).
+    # 4. Never `shutdown(wait=True)` on the caller's thread: it waits for
+    #    good on a worker that cannot leave. Every worker is ended here,
+    #    within a bound, through the handle captured when it was spawned.
+    # 5. Sentinels, never `join()` or `is_alive()` on a handle: the
+    #    executor's manager thread joins the same process.
+    # 6. A death is a future's `BrokenProcessPool`, never a nonzero exit
+    #    code: a worker whose initializer raises exits with code 0.
+
+    def __init__(self, width, *, recycle_after, disable_gc,
+                 depth=_SLOT_DEPTH):
+        if not isinstance(width, int) or width < 1:
+            raise ValueError(f"max_workers must be at least 1, not {width!r}")
+        if recycle_after is not None and (
+                not isinstance(recycle_after, int) or recycle_after < 1):
+            raise ValueError(
+                f"maxtasksperchild must be a positive int or None, not "
+                f"{recycle_after!r}")
+        if not isinstance(depth, int) or depth < 1:
+            raise ValueError(f"depth must be at least 1, not {depth!r}")
+        self._width = width
+        self._recycle_after = recycle_after
+        self._disable_gc = disable_gc
+        self._depth = depth
+        self._live = []       # slots not yet told to leave
+        self._retiring = []   # (process, told to leave at): told to leave
+        self._chunks = None
+        self._func = None
+
+    def _started(self, process):
+        """Called with each worker's process once it is spawned. A hook for
+        tests, which record every worker to end it on their way out."""
+
+    # --- feeding ----------------------------------------------------------
+
+    def _next_chunk(self):
+        """The next `(sequence, first index, chunk)`, or None when the items
+        are used up. Read one chunk at a time: `items` may be an iterator,
+        and `export_batch` hands one."""
+        if self._chunks is None:
+            return None
+        chunk = next(self._chunks, None)
+        if chunk is None:
+            self._chunks = None
+        return chunk
+
+    def _accepting(self, slot) -> bool:
+        return (self._recycle_after is None
+                or slot.given < self._recycle_after)
+
+    def _process_of(self, slot):
+        """The slot's worker process, captured from the executor the first
+        time it is asked for after a `submit()`; None before that."""
+        if slot.process is None and not slot.shut:
+            processes = getattr(slot.executor, "_processes", None) or {}
+            values = []
+            for _ in range(3):
+                try:
+                    values = list(processes.values())
+                    break
+                except RuntimeError:  # the dict changed while it was read
+                    continue
+            started = [p for p in values if getattr(p, "pid", None)]
+            if started:
+                slot.process = started[0]
+                self._started(slot.process)
+        return slot.process
+
+    def _open(self):
+        slot = _Slot(new_spawn_process_pool(1, disable_gc=self._disable_gc))
+        # Recorded before the first `submit()`, which spawns the worker, so
+        # an exit that runs while it spawns still finds it.
+        self._live.append(slot)
+        return slot
+
+    def _submit(self, slot, chunk):
+        """Hand `chunk` to `slot`. Returns False when the slot's worker has
+        died, which the caller treats as a death; the chunk then counts as
+        one it held."""
+        slot.given += 1
         try:
-            value = iterator.next(timeout=_POOL_WATCH_S)
-        except multiprocessing.TimeoutError:
-            yield from _checked(iterator, watch)
-            continue
-        except StopIteration:
-            return
-        yield value
-        if watch.due():
-            yield from _checked(iterator, watch)
+            future = slot.executor.submit(_run_chunk, self._func, chunk[2])
+        except BrokenProcessPool:
+            # A broken executor refuses at once. The chunk never ran, and
+            # the stream cannot deliver it now.
+            slot.inflight[_LostChunk()] = chunk
+            return False
+        slot.inflight[future] = chunk
+        self._process_of(slot)
+        return True
 
-
-def _checked(iterator, watch):
-    """`watch.check()`; on a failure, yield the results already delivered
-    first, then raise."""
-    try:
-        watch.check()
-    except BrokenProcessPool:
-        # Results the result handler has already taken off the pipe are not
-        # lost. On the ordered path (`imap`), results held behind the lost
-        # task's index are not delivered, and are lost.
+    def _fill(self):
+        """Hand out chunks until every worker holds `depth` or the items are
+        used up. Returns `[slot]` for the slot whose worker refused a
+        chunk, or `[]`."""
         while True:
+            open_slots = [s for s in self._live if self._accepting(s)
+                          and len(s.inflight) < self._depth]
+            slot = min(open_slots, key=lambda s: len(s.inflight),
+                       default=None)
+            # A new worker before a second chunk to a busy one: spread first.
+            open_new = (len(self._live) < self._width
+                        and (slot is None or slot.inflight))
+            if slot is None and not open_new:
+                return []
+            chunk = self._next_chunk()
+            if chunk is None:
+                return []
+            if open_new:
+                slot = self._open()
+            if not self._submit(slot, chunk):
+                return [slot]
+
+    # --- retiring ---------------------------------------------------------
+
+    def _retire(self, slot):
+        """Tell the slot's worker to leave, and watch it until it has."""
+        process = self._process_of(slot)
+        # Watched before it leaves `_live`, so an interrupt between the two
+        # leaves the worker in at least one list an exit reads; never in
+        # neither. The unfinished exit reads both and ends each once.
+        if process is not None:
+            self._retiring.append((process, time.monotonic()))
+        self._live.remove(slot)
+        slot.shut = True
+        # `wait=False`, always (rule 4). The worker gets the executor's exit
+        # sentinel and leaves on its own, running its exit work (`atexit`,
+        # coverage's data file).
+        slot.executor.shutdown(wait=False)
+
+    def _end_late_leavers(self, now, final=False):
+        """Drop the workers told to leave that have left; SIGKILL those still
+        running `_BROKEN_POOL_GRACE_S` after they were told, and name them.
+        With `final`, wait for the rest first, each to its own deadline."""
+        if not self._retiring:
+            return
+        if final:
+            last = max(at for _, at in self._retiring) + _BROKEN_POOL_GRACE_S
+            processes = [p for p, _ in self._retiring]
             try:
-                value = iterator.next(timeout=0)
-            except (multiprocessing.TimeoutError, StopIteration):
+                _wait_for_sentinels(processes, last)
+            finally:
+                # On every way out of the wait, Ctrl-C included: kill, then
+                # let the interrupt go on (#861, round 2). No `return` here.
+                self._kill_late(time.monotonic(), every=True)
+            return
+        self._kill_late(now, every=False)
+
+    def _kill_late(self, now, every):
+        if every:
+            # The exit's kill: `_kill_still_running`, so a Ctrl-C in its
+            # readiness check still kills every one before it goes on
+            # (review of #913).
+            late, self._retiring = self._retiring, []
+            killed = _kill_still_running(p for p, _ in late)
+        else:
+            still = set(_still_running_or_all(p for p, _ in self._retiring))
+            late = [(p, at) for p, at in self._retiring if p in still
+                    and now - at >= _BROKEN_POOL_GRACE_S]
+            self._retiring = [(p, at) for p, at in self._retiring
+                              if p in still and (p, at) not in late]
+            killed = _kill_each(p for p, _ in late)
+        if killed:
+            # The time measured, not the grace. A log line and no audit row,
+            # as #860's ruling Q3 has for a kill: the worker had sent every
+            # result. Tests count these lines by "had finished their tasks";
+            # the words "recycling pool" and "told to stop" belong to the
+            # unfinished exit's line, and must not appear here.
+            get_logger().warning(
+                "%d worker process(es) had finished their tasks but were "
+                "still running %.1f s after they were told to leave, and "
+                "were sent SIGKILL (pid %s). A worker cannot leave while a "
+                "non-daemon thread is still running or an exit handler does "
+                "not return.",
+                len(killed), now - min(at for _, at in late),
+                ", ".join(str(pid) for pid in killed))
+
+    # --- deaths -----------------------------------------------------------
+
+    def _ended(self, slots):
+        """The slots of `slots` whose worker process has ended, read from
+        its sentinel.
+
+        A live worker holding no chunk has no future to fail, so this is how
+        its death is seen; any death fails the stream, idle or not (owner
+        ruling Q1 on #887).
+        """
+        dead = []
+        for slot in slots:
+            process = self._process_of(slot)
+            if process is None:
+                continue
+            try:
+                if not _still_running([process]):
+                    dead.append(slot)
+            except (OSError, ValueError):
+                dead.append(slot)
+        return dead
+
+    @staticmethod
+    def _exit_code(process):
+        """The dead worker's exit code, read only once its sentinel is ready
+        (#861's rule), or None when it cannot be known."""
+        if process is None:
+            return None
+        deadline = time.monotonic() + 5.0
+        try:
+            multiprocessing.connection.wait([process.sentinel], timeout=5.0)
+            code = process.exitcode
+            # The manager thread joins the same process as the future fails,
+            # and whichever `waitpid` loses reads None for an instant; the
+            # winner caches the code on the `Popen` both read.
+            while code is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+                code = process.exitcode
+        except (OSError, ValueError):
+            return None
+        return code
+
+    def _broken(self, dead):
+        """The `BrokenProcessPool` for the deaths of the workers of `dead`
+        (a list of slots, every one seen in the same wake), its `lost`
+        naming the chunks they held. The message names the first."""
+        slot = dead[0]
+        process = slot.process
+        pid = process.pid if process is not None else None
+        code = self._exit_code(process)
+        held = "pid unknown" if pid is None else f"pid {pid}"
+        if code:
+            # Its words must not include "recycling pool", "SIGKILL" or
+            # "had finished their tasks", by which tests count the two kill
+            # lines. A plain `BrokenProcessPool`, never a subclass:
+            # `_report_export_failures` writes the class name into the row.
+            message = (
+                f"A worker process of a pool that recycles its workers ended "
+                f"abruptly ({held}, exit code {code}) while the pool was "
+                f"running; the work it held cannot finish, so the pool was "
+                f"stopped.")
+        else:
+            # 0 or unknown is never quoted as the cause: a worker whose
+            # initializer raises logs it and exits 0.
+            message = (
+                f"A worker process of a pool that recycles its workers ended "
+                f"({held}) before it returned the work it held, while the "
+                f"pool was running; a worker whose initializer raises ends "
+                f"this way. The work it held cannot finish, so the pool was "
+                f"stopped.")
+        exc = BrokenProcessPool(message)
+        # For #668: `(first item index, chunk)` for each chunk a dead worker
+        # held, every worker that died in the same wake included (owner
+        # ruling Q-B on #1199), so they can be run again one at a time.
+        # Nothing reads it yet.
+        exc.lost = tuple(sorted(((start, chunk) for each in dead
+                                 for _, start, chunk in each.inflight.values()),
+                                key=lambda pair: pair[0]))
+        return exc
+
+    # --- the stream -------------------------------------------------------
+
+    def run(self, func, items, chunksize, ordered):
+        """Run `func` on every item, yielding each result.
+
+        Args:
+            func: The worker function; module scope, it must pickle.
+            items: The items, read lazily.
+            chunksize (int): Items per task.
+            ordered (bool): Yield in submission order rather than as
+                workers finish.
+
+        Yields:
+            Each result. A task's own exception propagates.
+
+        Raises:
+            BrokenProcessPool: A worker died; after every result already
+                delivered (on the ordered path, the ones in submission
+                order before the first missing).
+        """
+        if not isinstance(chunksize, int) or chunksize < 1:
+            raise ValueError(f"chunksize must be at least 1, not {chunksize!r}")
+        self._func = func
+        self._chunks = _numbered_chunks(items, chunksize)
+        finished = False
+        # Seen by `_end_open_slot_pools` at interpreter exit while it runs.
+        # Held here, not read again in the `finally`: a generator finalized
+        # during module teardown would find the global already None.
+        open_pools = _OPEN_SLOT_POOLS
+        open_pools.add(self)
+        try:
+            yield from self._stream(ordered)
+            finished = True
+        finally:
+            try:
+                if finished:
+                    self._finished_exit()
+                else:
+                    self._unfinished_exit()
+            finally:
+                open_pools.discard(self)
+
+    def _stream(self, ordered):
+        held = {}        # ordered: sequence -> results, or a task's exception
+        outcomes = []
+        next_seq = 0
+
+        def sink(sequence, outcome):
+            if ordered:
+                held[sequence] = outcome
+            else:
+                outcomes.append(outcome)
+
+        def ready():
+            nonlocal next_seq, outcomes
+            while next_seq in held:
+                outcomes.append(held.pop(next_seq))
+                next_seq += 1
+            taken, outcomes = outcomes, []
+            return taken
+
+        dead = self._fill()
+        while not dead:
+            futures = [f for s in self._live for f in s.inflight]
+            if not futures:
                 break
-            yield value
-        raise
+            done, _ = concurrent.futures.wait(
+                futures, timeout=_POOL_WATCH_S,
+                return_when=concurrent.futures.FIRST_COMPLETED)
+            dead = self._settle(done, sink)
+            if not dead:
+                dead = self._ended([s for s in self._live if not s.inflight])
+            if not dead:
+                self._end_late_leavers(time.monotonic())
+                dead = self._fill()
+            if dead:
+                break
+            for outcome in ready():
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                yield from outcome
+        if not dead:
+            return
+        # Every other worker found ended by now died in the same wake: its
+        # futures may not be failed yet (the executor's manager thread marks
+        # them), but the chunks it held are lost all the same (owner ruling
+        # Q-B on #1199).
+        dead += self._ended([s for s in self._live if s not in dead])
+        # Every result another worker had already returned is delivered
+        # before the death is raised, whichever way the death was seen (a
+        # future, an idle worker's sentinel, a refused submit); on the
+        # ordered path only those before the first missing one, because
+        # `import_files` reads "delivered" as a prefix.
+        others = {f for s in self._live if s not in dead
+                  for f in s.inflight if f.done()}
+        self._settle(others, sink, deaths=False)
+        for outcome in ready():
+            if isinstance(outcome, BaseException):
+                raise outcome
+            yield from outcome
+        raise self._broken(dead)
+
+    def _settle(self, done, sink, deaths=True):
+        """Take each finished future in `done` off its slot and hand its
+        results, or its task's exception, to `sink(sequence, outcome)`.
+        Retires each slot that has run its quota and holds nothing.
+
+        Returns:
+            Every slot whose worker died, in `_live` order; `[]` if none.
+            With `deaths=False` a dead worker's future is left where it is,
+            and `[]` is returned.
+        """
+        dead = []
+        for slot in list(self._live):
+            for future in [f for f in slot.inflight if f in done]:
+                exc = future.exception()
+                if isinstance(exc, BrokenProcessPool):
+                    if deaths and slot not in dead:
+                        dead.append(slot)
+                    continue
+                sequence, _, _ = slot.inflight.pop(future)
+                sink(sequence, exc if exc is not None else future.result())
+            if (slot not in dead and not slot.inflight
+                    and not self._accepting(slot)):
+                self._retire(slot)
+        return dead
+
+    # --- exits ------------------------------------------------------------
+
+    def _finished_exit(self):
+        """Every result was read: tell every worker to leave, and end, after
+        its grace, each one that has not."""
+        for slot in list(self._live):
+            self._retire(slot)
+        self._end_late_leavers(time.monotonic(), final=True)
+
+    def _unfinished_exit(self):
+        """Any other way out: a reader that stops, a task's exception, a
+        death, Ctrl-C. SIGTERM every worker, wait at most
+        `_BROKEN_POOL_GRACE_S`, SIGKILL each one still running and name
+        them in one WARNING, then shut every executor down."""
+        # Nothing left to end: return before anything else is read. The
+        # interpreter-exit hook (`_end_open_slot_pools`) ends an open pool,
+        # and the stream's own `finally` then runs this again during module
+        # teardown, when this module's globals (`time` among them) may
+        # already be None (review of #1199, finding 3).
+        if not self._live and not self._retiring:
+            return
+        processes = [self._process_of(s) for s in self._live]
+        processes += [p for p, _ in self._retiring]
+        # A worker whose spawn was interrupted may be in `_processes`
+        # without having been captured.
+        for slot in self._live:
+            if slot.process is None:
+                processes += list((getattr(slot.executor, "_processes", None)
+                                   or {}).values())
+        unique = {}
+        for process in processes:
+            if process is not None:
+                unique.setdefault(id(process), process)
+        processes = list(unique.values())
+        self._retiring = []
+        started = time.monotonic()
+        try:
+            try:
+                for process in processes:
+                    try:
+                        process.terminate()
+                    except (OSError, ValueError, AttributeError):
+                        continue
+                _wait_for_sentinels(processes, started + _BROKEN_POOL_GRACE_S)
+            finally:
+                # On every way out of the wait, and Ctrl-C is one: kill,
+                # then let it go on. A `finally`, never an `except`, and no
+                # `return` in it (#861, round 2).
+                killed = _kill_still_running(processes)
+                if killed:
+                    # The time measured, not the grace: an interrupt ends
+                    # the wait early. Tests count these lines by "after the
+                    # pool was told to stop".
+                    get_logger().warning(
+                        "%d worker process(es) of the recycling pool were "
+                        "still running %.1f s after the pool was told to "
+                        "stop, and were sent SIGKILL (pid %s). A worker "
+                        "outlives SIGTERM when something in it handles that "
+                        "signal; a handler a script installs at module level "
+                        "runs again in every spawned worker.",
+                        len(killed), time.monotonic() - started,
+                        ", ".join(str(pid) for pid in killed))
+        finally:
+            # After the kill, so no executor has a worker left for its
+            # manager thread to join while it holds the lock `shutdown()`
+            # takes.
+            for slot in self._live:
+                if slot.shut:
+                    continue
+                slot.shut = True
+                try:
+                    slot.executor.shutdown(wait=False, cancel_futures=True)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    continue
+            self._live = []
+
+
+class _LostChunk:  # pylint: disable=too-few-public-methods
+    """Stands in for the future of a chunk a broken executor refused, so
+    the chunk is named in `lost` with the ones the dead worker held."""
+
+    def done(self):
+        return False
+
+
+def _numbered_chunks(items, chunksize):
+    """Yield `(sequence, first item index, chunk)` from `items`, lazily."""
+    iterator = iter(items)
+    sequence = 0
+    start = 0
+    while True:
+        chunk = list(itertools.islice(iterator, chunksize))
+        if not chunk:
+            return
+        yield sequence, start, chunk
+        sequence += 1
+        start += len(chunk)
+
+
+#: Every `_SlotPool` whose stream is open, for `_end_open_slot_pools`.
+_OPEN_SLOT_POOLS = weakref.WeakSet()
+
+
+def _end_open_slot_pools():
+    """At interpreter exit, end every recycling pool whose stream is still
+    open, as its own unfinished exit would (owner ruling Q-A on #1199).
+
+    A stream left open at exit (Ctrl-C or an uncaught exception in the
+    caller's loop, whose traceback keeps the generator alive) never reaches
+    its `finally` before `concurrent.futures`' own exit hook joins every
+    executor's manager thread, which waits for every task in flight and,
+    with a worker that cannot leave, for good.
+    """
+    for pool in list(_OPEN_SLOT_POOLS):
+        try:
+            pool._unfinished_exit()  # pylint: disable=protected-access
+        except Exception:  # pylint: disable=broad-exception-caught
+            continue
+
+
+# Registered after `concurrent.futures.process` is imported (the
+# `BrokenProcessPool` import above), because `threading._shutdown` runs these
+# hooks last-registered first: this one must run before that module's
+# `_python_exit`, which joins the manager threads. `threading._register_atexit`
+# is private; it is the only hook that runs before those joins (`atexit` runs
+# after them), and it is the one `concurrent.futures` itself uses.
+# `test_the_recycling_pool_is_a_slot_pool.py` runs a real interpreter exit
+# with a stream left open on each interpreter the gate runs.
+threading._register_atexit(_end_open_slot_pools)  # pylint: disable=protected-access
 
 
 def _run_on_recycling_pool(func, items, strategy, ordered=False):
-    """Runs in a spawned pool whose workers are replaced every N tasks.
+    """Runs on one-worker spawned pools, each replaced after N tasks.
 
     Args:
         func: The worker function.
         items: The items to process.
         strategy (_Strategy): Its worker count, `maxtasksperchild`,
-            initializer, `chunksize` and progress settings apply.
+            `disable_gc`, `chunksize` and progress settings apply.
         ordered (bool): Yield in submission order rather than as workers
             finish.
 
@@ -1306,49 +1544,26 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
         Each result, as workers finish unless `ordered`.
     """
     # For the imaging paths, where the C libraries behind decoding and
-    # compression leak steadily. `ProcessPoolExecutor(max_tasks_per_child=)`
-    # deadlocks `map` on 3.12 the first time a worker is replaced, so
-    # `multiprocessing.Pool` is the only way to get memory back on every
-    # supported interpreter. Do not switch to the executor keyword while
-    # 3.12 is supported.
+    # compression leak steadily: replacing the process is what gives the
+    # memory back. `_SlotPool` says why it is built the way it is.
     #
-    # Spawn, not fork: a forked worker inherits the parent's open SQLite
-    # handles and its sidecar file position.
-    #
-    # `_RecyclingPool`, not `ctx.Pool`, so every worker it starts is watched
-    # and bounds its own exit (#887, #888).
-    ctx = multiprocessing.get_context("spawn")
-    pool = _RecyclingPool(processes=strategy.max_workers,
-                          maxtasksperchild=strategy.maxtasksperchild,
-                          initializer=strategy.worker_initializer,
-                          context=ctx, exit_grace=_WORKER_EXIT_GRACE_S)
-    watch = _RecyclingWatch(pool)
-    # No `with`: its exit is `terminate()`, on every way out, which can
-    # wait for good (#860). `_end_recycling_pool` bounds it, and lets the
-    # workers of a run that finished leave by their sentinel.
-    finished = False
+    # Unordered unless asked: results are yielded as workers finish, so one
+    # slow item does not hold back everything queued behind it.
+    # `import_files` asks, because the order it links files in decides
+    # which of two files sharing an SOP Instance UID is kept, and arrival
+    # order would make that a matter of scheduling. `export()` does not:
+    # its results are small and order-free.
+    pool = _SlotPool(strategy.max_workers,
+                     recycle_after=strategy.maxtasksperchild,
+                     disable_gc=strategy.disable_gc)
+    stream = pool.run(func, items, strategy.chunksize, ordered)
     try:
-        # Unordered unless asked: results are yielded as workers finish,
-        # so one slow item does not hold back everything queued behind
-        # it. `import_files` asks, because the order it links files in
-        # decides which of two files sharing an SOP Instance UID is kept,
-        # and arrival order would make that a matter of scheduling.
-        # `export()` does not: its results are small and order-free, and
-        # holding them behind a slow instance buys nothing.
-        mapper = pool.imap if ordered else pool.imap_unordered
-        iterator = mapper(func, items, chunksize=strategy.chunksize)
-        yield from _tracked(_watched(iterator, watch), items, strategy)
-        # Only once every result has been read: any other way out (a
-        # reader that stops, a task's exception, a dead worker, Ctrl-C)
-        # leaves tasks queued or running, which `close()` and `join()`
-        # would wait for.
-        finished = True
+        yield from _tracked(stream, items, strategy)
     finally:
-        _end_recycling_pool(pool, finished)
-        # After the exit, for the bounds that fired inside it. An interrupt
-        # propagating out of `_end_recycling_pool` skips it, which costs
-        # only a log line; no `try` for it.
-        watch.sweep()
+        # `tqdm` does not pass `close()` on to what it wraps, so a reader
+        # that stops would leave the pool's exit to whenever the stream is
+        # collected.
+        stream.close()
 
 
 def _run_on_new_executor(func, items, strategy):
@@ -1366,25 +1581,16 @@ def _run_on_new_executor(func, items, strategy):
     Yields:
         Each result, in submission order.
     """
-    executor_class = (concurrent.futures.ThreadPoolExecutor
-                      if strategy.use_threads
-                      else concurrent.futures.ProcessPoolExecutor)
+    if strategy.use_threads:
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=strategy.max_workers)
+    else:
+        # This is the pool that pickles the store, so it is the one #220's
+        # spawn pin was for; `new_spawn_process_pool` holds it.
+        executor = new_spawn_process_pool(strategy.max_workers,
+                                          disable_gc=strategy.disable_gc)
 
-    kwargs = {'max_workers': strategy.max_workers}
-    if not strategy.use_threads:
-        # Spawn, not fork, for the recycling pool's reason: a forked
-        # worker inherits the parent's open SQLite handles and its
-        # sidecar file position. This is the pool that pickles the store,
-        # and the platform default is fork on Linux 3.12, where a forked
-        # worker's `persist_pixel_data` can stall on `database is locked`.
-        # macOS spawns by default, so a local run does not show the
-        # difference; `test_parallel_contract.py` pins the argument.
-        kwargs['mp_context'] = multiprocessing.get_context("spawn")
-    initializer = strategy.worker_initializer
-    if initializer:
-        kwargs['initializer'] = initializer
-
-    with executor_class(**kwargs) as executor:
+    with executor:
         try:
             iterator = executor.map(func, items, chunksize=strategy.chunksize)
             yield from _tracked(iterator, items, strategy)
@@ -1451,17 +1657,17 @@ def run_parallel(
             branch on `isinstance(result, Exception)`; by default a raise
             is a raise, because a caller with no such arm must never
             receive an exception as data. Under `maxtasksperchild`, a
-            worker that ends abnormally while the pool runs (killed, or
-            its initializer raised) fails the pool with
-            `BrokenProcessPool`, yielded last after the results already
-            delivered, within about `_POOL_WATCH_S` (1 s) (#887); a
-            worker whose exit does not finish after its last task is ended
-            by SIGALRM `_WORKER_EXIT_GRACE_S` (15 s) later and named in a
-            WARNING log line (#888). The recycling pool's exit is bounded: a worker still
-            running `_BROKEN_POOL_GRACE_S` (10 s) after the pool is told
-            to stop is sent SIGKILL and named in one WARNING log line, and
-            the call waits at most `_POOL_EXIT_AFTER_KILL_S` (5 s) more
-            for the pool to finish (#860).
+            worker that dies while the pool runs (killed, or its
+            initializer raised) fails the pool with `BrokenProcessPool`,
+            yielded last after the results already delivered: at once
+            when it held a task, within about `_POOL_WATCH_S` (1 s) when
+            it held none (#887, #885). A worker told to leave after its
+            last task that is still running `_BROKEN_POOL_GRACE_S` (10 s)
+            later is sent SIGKILL by the parent and named in a WARNING log
+            line (#888, #885). On any way out other than reading every
+            result, each worker is sent SIGTERM, and one still running
+            `_BROKEN_POOL_GRACE_S` later is sent SIGKILL and named in one
+            WARNING log line (#860).
         strategy (optional): A `_Strategy` the caller has already
             resolved with `_resolve_strategy`. When given it is used as
             it stands and **every resolution keyword above is ignored**

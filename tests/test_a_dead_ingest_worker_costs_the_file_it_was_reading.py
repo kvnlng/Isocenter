@@ -19,8 +19,9 @@ a spawned child imports `ingest_worker` afresh. `_die_reading` is a pool
 initializer, at module scope so the child imports it by name, that
 replaces `pydicom.dcmread` inside the child with one that ends the process
 for a path containing `POISON`. `_poison_pools` hands it to the session's
-pool and to the retry pools through `resolve_worker_initializer`, so every
-pool this code builds is poisoned the same way.
+pool and to the retry pools through `parallel.resolve_worker_initializer`,
+which `parallel.new_spawn_process_pool` reads for every pool it builds
+(#667), so every pool this code builds is poisoned the same way.
 
 **What no test here asserts: how many results arrive before the death.** At
 more than one worker that is scheduling -- measured on the same shape, 4
@@ -46,7 +47,6 @@ from pydicom.uid import generate_uid
 
 import isocenter.io_handlers as io_handlers
 import isocenter.parallel as parallel
-import isocenter.session as session_module
 from isocenter.io_handlers import DicomImporter
 from isocenter.session import DicomSession
 from isocenter.store import DicomStore
@@ -174,11 +174,9 @@ def _die_at_start():
 def _poison_pools(monkeypatch, how="exit", once_marker=None, initializer=None):
     """Every pool `ingest()` builds runs `initializer` in each worker.
 
-    Both bindings are patched: the session's, for the shared pool, and
-    `io_handlers`', for the pools the retry builds. `raising=False` on the
-    second, so that on a tree without that binding the tests go red for the
-    reason they exist -- the raise out of `ingest()` -- and not on an
-    `AttributeError` in this fixture.
+    `parallel`'s binding alone: since #667 the shared pool, its rebuilds and
+    the pools the retry builds all come from `parallel.new_spawn_process_pool`,
+    which resolves the initializer through it.
     """
     init = initializer or functools.partial(_die_reading, "POISON", how,
                                             once_marker)
@@ -186,9 +184,7 @@ def _poison_pools(monkeypatch, how="exit", once_marker=None, initializer=None):
     def resolve(disable_gc=False):  # pylint: disable=unused-argument
         return init
 
-    monkeypatch.setattr(session_module, "resolve_worker_initializer", resolve)
-    monkeypatch.setattr(io_handlers, "resolve_worker_initializer", resolve,
-                        raising=False)
+    monkeypatch.setattr(parallel, "resolve_worker_initializer", resolve)
 
 
 def _folder(tmp_path, n, poison_at=(), tags=None):
