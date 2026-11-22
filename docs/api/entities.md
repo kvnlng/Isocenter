@@ -50,18 +50,48 @@ one exception. `export()` writes a `tuple` of exactly two integers, or
 of exactly two `str`, as one tag, as pydicom reads it (#1009). The pair
 must still be a `tuple` when the export reads it. After `set_attr()`, a
 `tuple` that holds a numpy number is still a `tuple` (above), so a pair
-of numpy integers set that way is one tag. A `list` of two integers is
-two tags. A store that was saved and opened again holds the pair as a
-`list`
-([#1016](https://github.com/kvnlng/Isocenter/issues/1016), open). The
+of numpy integers set that way is one tag. Each half must be from 0 to
+0xFFFF. A pair of full tags is two tags. A `list` of two integers is
+two tags. A store that was saved and opened again holds every other
+`tuple` as a `list`
+([#1003](https://github.com/kvnlng/Isocenter/issues/1003)). The pair
+under a standard `AT` element is the one exception: the save stores it
+as the one tag it names, as an `int`, so the export after a reopen
+writes the same tag
+([#1016](https://github.com/kvnlng/Isocenter/issues/1016)). The
 save refuses a `Decimal`, and only a value written straight into
-`attributes`, or a graph built by hand, can hold one. `export()` changes
-none of the three in `attributes`.
+`attributes`, or a graph built by hand, can hold one. `export()` writes
+a `bytearray` as the `bytes` it equals. `export()` changes none of these
+values in `attributes`.
 
 A number under a standard element whose VR holds text
 (`set_attr("0008,1090", 7)`) is not written. The file is exported
 without that element, under one `DATA_LOSS` row that names the tag, the
-type and the VR. Pass the text instead. The store holds `None`, `str`,
+type and the VR. Pass the text instead. This includes a subclass of
+`int` or `float`, such as an `IntEnum`. A list member that holds a
+backslash (`["A\\B", "C"]`) is several values, and is not written
+either. A value that a source file wrote under IS or DS for a text
+element is written as the file's own text.
+
+The same holds for the other standard VRs. Each value below is not
+written, and the file is exported without that element under one
+`DATA_LOSS` row:
+
+- under OB, OW, OF, OD, OL or OV, a value that is not `bytes`. A number,
+  text, a list and a numpy array are not written. Pass `.tobytes()`;
+- under US, SS, UL, SL, UV or SV, a value that is not an integer in the
+  VR's range;
+- under FL or FD, a value that is not a number, or a number too large
+  for FL;
+- under AT, a value that is not a tag. A float, a `bool` and `None` are
+  not tags. An integer from 0 to 0xFFFFFFFF is a tag, a group-0000 tag
+  included;
+- under any of these VRs, and under IS and DS, a numpy value that is
+  not a number, such as a `timedelta64`, a `datetime64`, a complex or a
+  masked value, or an array.
+
+`None`, `""` and `[]` are written as the element with no value, under
+every VR. The store holds `None`, `str`,
 `bytes`, `bool`, `int`, `float`, pydicom's DS and IS values, and lists
 of those. `set_attr()` does not raise for a value of another type. The
 next `save(sync=True)`, `export()` or `compact()` raises `TypeError`
