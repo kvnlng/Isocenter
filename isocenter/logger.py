@@ -124,7 +124,7 @@ def describe_exception(exc: BaseException) -> str:
 
 
 def _with_cause(exc: BaseException, describe) -> str:
-    """`describe(exc)`, and ` (caused by <describe(cause)>)` unless already said.
+    """`describe(exc)`, followed by its cause unless its message already says it.
 
     The tail is left out when the message already holds the cause
     (#1089): it contains the cause's own one-line description, or it

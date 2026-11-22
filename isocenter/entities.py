@@ -1082,9 +1082,11 @@ def _missing_decoder_words(error, ds) -> Optional[str]:
     Decided from state, never from the failure's message (#623). Two
     cases, and nothing else:
 
-    1. The imagecodecs fallback was asked and imagecodecs did not import:
-       an `imagecodecs_handler.ImagecodecsUnavailable` in the failure's
-       cause chain.
+    1. The imagecodecs fallback was asked and imagecodecs did not
+       import, or imported and the codec module the syntax needs did not
+       load (#1092): an `imagecodecs_handler.ImagecodecsUnavailable` in
+       the failure's cause chain. The advice names the module where the
+       refusal does (`codec_module`).
     2. The failure is a `RuntimeError`, the file's transfer syntax is not
        one the fallback reads, and pydicom's decoder for it reports no
        usable plugin.
@@ -1108,6 +1110,21 @@ def _missing_decoder_words(error, ds) -> Optional[str]:
             # No word of the import failure here: its message can hold
             # an install path (`imagecodecs_handler._unavailable`). The
             # command is how a user reads it.
+            #
+            # imagecodecs imported and one of its codec modules did not
+            # (#1092): the module is named, from the handler's own table
+            # by syntax, and checked as `_unavailable` checks
+            # `ImportError.name`, so only a dotted identifier reaches the
+            # sentence and the command.
+            module = getattr(cause, "codec_module", None)
+            if isinstance(module, str) and module and all(
+                    part.isidentifier() for part in module.split(".")):
+                return (f"imagecodecs imported, and its codec module "
+                        f"imagecodecs.{module} did not load. This library "
+                        f"reads this transfer syntax with it where pydicom "
+                        f"cannot; reinstall imagecodecs. Running `python -c "
+                        f"\"import imagecodecs.{module}\"` shows the "
+                        f"import's own error.")
             return ("imagecodecs did not import. This library installs it "
                     "and reads this transfer syntax with it where pydicom "
                     "cannot; reinstall imagecodecs. Running `python -c "

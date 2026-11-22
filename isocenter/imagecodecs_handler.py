@@ -114,7 +114,7 @@ def is_available():
 
 
 class ImagecodecsUnavailable(RuntimeError):
-    """The fallback was asked to decode and imagecodecs did not import.
+    """The fallback was asked to decode, and imagecodecs or one of its codec modules did not import.
 
     A class of its own so that `Instance.get_pixel_data` can tell a
     missing decoder from a file no decoder reads by what was raised, not
@@ -122,7 +122,17 @@ class ImagecodecsUnavailable(RuntimeError):
     reads (`... could not decode it either: ImagecodecsUnavailable:
     imagecodecs is not available: its import raised ImportError ...`).
     At module level, so it pickles.
+
+    Where imagecodecs imported and the codec module the syntax needs did
+    not (#1092), `codec_module` holds that module's name (`"_ljpeg"`), and
+    `entities._missing_decoder_words` names it in its advice. It is set
+    as an attribute, so it rides `BaseException.__reduce__`'s `__dict__`
+    through a pickle with the message.
     """
+
+    #: The imagecodecs extension module that did not load, from
+    #: `CODEC_MODULES`, or None when imagecodecs itself did not import.
+    codec_module = None
 
 
 def _unavailable() -> ImagecodecsUnavailable:
@@ -218,6 +228,46 @@ SUPPORTED_TRANSFER_SYNTAXES = [
     HTJ2KLosslessRPCL,
     HTJ2K,
 ]
+
+
+#: The imagecodecs extension module each `SUPPORTED_TRANSFER_SYNTAXES`
+#: member is decoded with, by `_decode_frame`'s arm for it (#1092). This
+#: library's own table, read by syntax: never parsed out of an error's
+#: message (#623) and never read from imagecodecs' private `_ATTRIBUTES`
+#: (a test holds the two together). JPEG Baseline and Extended go
+#: through `imagecodecs.jpeg_decode`, a Python function that calls
+#: `jpeg8_decode`; its `ljpeg_decode` retry runs under
+#: `contextlib.suppress`, so `_jpeg8` is the one module that can fail it.
+CODEC_MODULES = {
+    JPEGLossless: "_ljpeg",
+    JPEGLosslessSV1: "_ljpeg",
+    JPEGBaseline: "_jpeg8",
+    JPEGExtended: "_jpeg8",
+    JPEGLSLossless: "_jpegls",
+    JPEGLSLossy: "_jpegls",
+    **{syntax: "_jpeg2k" for syntax in J2K_SYNTAXES},
+}
+
+
+def _codec_module_unavailable(transfer_syntax) -> ImagecodecsUnavailable:
+    """The refusal for a codec module that did not load, naming it (#1092).
+
+    Raise it `from None`, as `_unavailable()` is raised: the loader's
+    own error, which `DelayedImportError` chains, can name an install
+    path.
+
+    Args:
+        transfer_syntax (UID): The syntax being decoded.
+
+    Returns:
+        ImagecodecsUnavailable: With `codec_module` set.
+    """
+    module = CODEC_MODULES[transfer_syntax]
+    refusal = ImagecodecsUnavailable(
+        f"imagecodecs is not available: its codec module "
+        f"imagecodecs.{module} did not load")
+    refusal.codec_module = module
+    return refusal
 
 
 def supports_transfer_syntax(transfer_syntax):
@@ -1882,10 +1932,23 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
     if not is_available():
         raise _unavailable() from None
     transfer_syntax = ds.file_meta.TransferSyntaxUID
-    frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
-              for bitstream in islice(
-                  generate_frames(ds.PixelData,
-                                  number_of_frames=number_of_frames,
-                                  extended_offsets=extended_offsets(ds)),
-                  number_of_frames)]
+    # imagecodecs imports its codec modules lazily, at the first call of
+    # a codec function, and a module that cannot load (a missing shared
+    # library) raises `DelayedImportError`, an `ImportError`, from that
+    # call. It is the installation at fault, not the file, so it gets
+    # the installation's refusal (#1092). Read with `getattr`: a test may
+    # set `imagecodecs` to an object without it, and a class of None
+    # would make the `except` below a `TypeError`.
+    delayed = getattr(imagecodecs, "DelayedImportError", None) or ()
+    try:
+        frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
+                  for bitstream in islice(
+                      generate_frames(ds.PixelData,
+                                      number_of_frames=number_of_frames,
+                                      extended_offsets=extended_offsets(ds)),
+                      number_of_frames)]
+    except delayed:
+        if transfer_syntax not in CODEC_MODULES:
+            raise
+        raise _codec_module_unavailable(transfer_syntax) from None
     return frames[0] if number_of_frames == 1 else np.stack(frames)
