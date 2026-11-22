@@ -3209,10 +3209,11 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
 
 
 def _no_frame_boundary_words(ds) -> str:
-    """The refusal for encapsulated fragments with no frame boundary.
+    """The refusal for encapsulated fragments the decode could not split into the declared frames.
 
     Names the fragment count, read the way pydicom's generator reads it
-    (or says it could not be counted), and the declared NumberOfFrames.
+    (or says it could not be counted), the table pydicom read by where
+    there is one, and the declared NumberOfFrames.
 
     Args:
         ds: The pydicom `Dataset` whose Pixel Data could not be split.
@@ -3226,59 +3227,50 @@ def _no_frame_boundary_words(ds) -> str:
     # its codecs-missing message from state since #623 (not by
     # "decompress" or "missing dependencies").
     #
-    # "with no offset table" is true of a Basic Offset Table only because
-    # of a guard upstream: a file whose Basic Offset Table names a frame
-    # count is refused by `imagecodecs_handler.offset_table_frame_count`
-    # before any decode, so one that disagrees with the fragments never
-    # gets here. If that guard stops answering first, the clause becomes
-    # false.
+    # **The clause is built from what the file holds** (#1067), in the
+    # order pydicom reads by: an Extended Offset Table it walks by
+    # (`extended_offsets`), then a populated Basic Offset Table, each
+    # named with the frames it names. Such a table *runs out*, which is
+    # not a missing boundary, so "pydicom found no frame boundary" is said
+    # only where no table is walked. No door reaches a walked table here:
+    # ingest, the read door and an icon refuse on the count first
+    # (`imagecodecs_handler.offset_table_frame_count`), which since #1067
+    # counts a dropped Extended Offset Table naming more by the populated
+    # Basic Offset Table naming fewer. A direct call of the decode does.
     #
-    # **It is not true of an Extended Offset Table**: one pydicom drops
-    # (its Lengths element is another length) is counted as the same
-    # file without it unless it names more frames than declared (#621),
-    # and one naming more is decoded to the declared frames, so a
-    # dataset holding a table arrives here. The clause then says what is
-    # true: none that pydicom walks by. Before #621 a dropped table that
-    # agreed or named more got "with no offset table", over a dataset
-    # holding one.
-    #
-    # **"pydicom walks by" is said only of a table it does not walk by**
-    # (`extended_offsets(ds) is None`), never of every dataset holding
-    # the element. A table of equal Lengths naming fewer frames than
-    # declared runs out the same way, and at every door the count
-    # refuses it first; a direct call of the decode gets here, and keeps
-    # the words it had before #621 rather than a clause that is false of
-    # it.
-    #
-    # **The Basic Offset Table guard above has one hole**, measured: a
-    # dropped Extended Offset Table naming *more* frames than declared is
-    # counted from that table, so a populated Basic Offset Table naming
-    # fewer is not asked, and the file arrives here saying "with no
-    # offset table" over one pydicom walks by. Not fixed (it is the
-    # excess arm's, which #621 did not change); the clause is not
-    # lengthened for it, because the longer one would be false too.
+    # **"pydicom walks by" is said only of a table it does not walk by**:
+    # an Extended Offset Table pydicom drops (its Lengths element is
+    # another length) over an empty Basic Offset Table. Without it the
+    # clause would say "no offset table" of a dataset holding one.
     #
     # The `except` branch says nothing about the table, because it has
     # parsed nothing to say it from.
     declared = declared_frame_count(ds)
-    table = "no offset table"
     try:
         buf = BytesIO(ds.PixelData)
-        # Only over an empty Basic Offset Table: pydicom walks by a
-        # populated one, so the longer clause would be false there. That
-        # shape is reached under a dropped Extended Offset Table naming
-        # more frames than declared, and keeps the words it had.
-        if (not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable")
-                and extended_offsets(ds) is None):
-            table += " pydicom walks by"
+        basic = parse_basic_offsets(buf)
         fragments, _offsets = parse_fragments(buf)
-        held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
-                f"with {table}")
     except Exception:  # pylint: disable=broad-except
-        held = "holds fragments pydicom could not count"
-    return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
-            f"pydicom found no frame boundary in them, so the declared "
-            f"frames cannot be read")
+        return (f"Pixel Data holds fragments pydicom could not count, and "
+                f"NumberOfFrames declares {declared}: pydicom found no frame "
+                f"boundary in them, so the declared frames cannot be read")
+    held = f"holds {fragments} fragment{'' if fragments == 1 else 's'}"
+    walked = extended_offsets(ds)
+    if walked is not None:
+        named = len(walked[0]) // 8
+        table = "an Extended Offset Table"
+    elif basic:
+        named = len(basic)
+        table = "a Basic Offset Table"
+    else:
+        table = ("no offset table pydicom walks by"
+                 if ds.get("ExtendedOffsetTable") else "no offset table")
+        return (f"Pixel Data {held} with {table}, and NumberOfFrames "
+                f"declares {declared}: pydicom found no frame boundary in "
+                f"them, so the declared frames cannot be read")
+    return (f"Pixel Data {held} with {table} naming {named} "
+            f"frame{'' if named == 1 else 's'}, and NumberOfFrames declares "
+            f"{declared}: the declared frames cannot be read")
 
 
 def _t81_frames_wider(ds, ts) -> Optional[list]:

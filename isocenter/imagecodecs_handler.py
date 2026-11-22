@@ -632,7 +632,29 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
             return None
         counted = (len(eot_bytes) // 8, declared, declared_raw,
                    "Extended Offset Table")
-        if walked_by or counted[0] > declared:
+        if walked_by:
+            return counted
+        if counted[0] > declared:
+            # **Except over a Basic Offset Table naming fewer** (#1067).
+            # pydicom drops the table and, where the Basic Offset Table
+            # is populated, reads by that, not by a walk: it is what
+            # describes the frames the decoder reads, and naming fewer
+            # than declared it runs out. Counted by it, the file is
+            # refused in the count's words; counted by the dropped table,
+            # it was decoded, and refused in a sentence saying it had no
+            # offset table. Only that direction: over a Basic Offset Table
+            # naming as many as declared or more, the dropped table's row
+            # stands (a graded row would vanish or change its subject),
+            # and over an empty one the table's count is the #621 guard
+            # (under NumberOfFrames 1 the walk loses frame 1 in silence).
+            if _drops_the_table(ds):
+                try:
+                    basic = parse_basic_offsets(ds.PixelData)
+                except Exception:  # pylint: disable=broad-except
+                    basic = None
+                if basic and len(basic) < declared:
+                    return (len(basic), declared, declared_raw,
+                            "Basic Offset Table")
             return counted
         if not _drops_the_table(ds):
             if counted[0] < declared:

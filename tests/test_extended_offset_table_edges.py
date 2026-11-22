@@ -709,22 +709,21 @@ def test_one_fragment_under_an_agreeing_dropped_table_gains_the_clause(
         + " (caused by StopIteration)")
 
 
-def test_the_clause_is_not_lengthened_over_a_populated_basic_offset_table(
+def test_a_dropped_table_naming_more_over_a_basic_table_naming_fewer(
         tmp_path):
     """24/4 (names more), a Basic Offset Table of one offset, one fragment.
 
-    Counted from the dropped table, so the Basic Offset Table is not
-    asked and the decode runs out of frames: `main`'s outcome and
-    `main`'s words, which are false of this file (pydicom walks by the
-    Basic Offset Table) and are not this change's. "pydicom walks by"
-    would be false of it as well, so it is not added.
+    Counted from the dropped table until #1067, so the Basic Offset Table
+    was not asked, the decode ran out of frames, and the row said "with
+    no offset table" over a file holding two. pydicom reads by the Basic
+    Offset Table here, so the file is now counted by it and refused in
+    the count's words.
     """
     path, ds = _on_disk(tmp_path, _table(1, 2, 24, 4, bot="one"))
-    assert offset_table_frame_count(ds) == (3, 2, 2, "Extended Offset Table")
+    assert offset_table_frame_count(ds) == (1, 2, 2, "Basic Offset Table")
 
     assert ingest_worker(path)[-1] == (
-        "Decompression Failed: RuntimeError: Pixel Data holds 1 fragment "
-        "with no offset table" + NO_BOUNDARY + " (caused by StopIteration)")
+        "Basic Offset Table names 1 frame; NumberOfFrames declares 2")
 
 
 @pytest.mark.parametrize("fragments, declared, size", [
@@ -734,9 +733,11 @@ def test_the_clause_is_not_said_of_a_table_pydicom_walks_by(
     """A direct `_decode_pixels` call on a table of equal Lengths, naming fewer.
 
     No door gets this far (the count refuses the file first, below), so
-    the sentence is reached only by a caller of the decode itself. It
-    keeps `main`'s words. "pydicom walks by" was said of it at fe439a55
-    (review of #1062, round 2), over a table pydicom does walk by.
+    the sentence is reached only by a caller of the decode itself. "pydicom
+    walks by" was said of it at fe439a55 (review of #1062, round 2), over
+    a table pydicom does walk by, and "with no offset table" until #1067.
+    It now names the table and its count, and says the frames ran out,
+    not that no boundary was found.
     """
     path, ds = _on_disk(tmp_path, _table(fragments, declared, size, size))
     assert imagecodecs_handler.extended_offsets(ds) is not None
@@ -745,9 +746,10 @@ def test_the_clause_is_not_said_of_a_table_pydicom_walks_by(
         _decode_pixels(ds)
     assert str(caught.value) == (
         f"Pixel Data holds {fragments} fragment"
-        f"{'' if fragments == 1 else 's'} with no offset table, and "
-        f"NumberOfFrames declares {declared}: pydicom found no frame "
-        f"boundary in them, so the declared frames cannot be read")
+        f"{'' if fragments == 1 else 's'} with an Extended Offset Table "
+        f"naming {size // 8} frame{'' if size // 8 == 1 else 's'}, and "
+        f"NumberOfFrames declares {declared}: the declared frames cannot "
+        f"be read")
     assert ingest_worker(path)[-1] == (
         f"Extended Offset Table names {size // 8} frame"
         f"{'' if size // 8 == 1 else 's'}; NumberOfFrames "
