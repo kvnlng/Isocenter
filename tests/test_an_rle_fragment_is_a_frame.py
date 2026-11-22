@@ -458,9 +458,9 @@ def test_two_rle_fragments_under_three_declared_frames_take_pydicoms_words(
 
 
 @pytest.mark.parametrize("table, refusal", [
-    ("basic", "Basic Offset Table names 1 frames; NumberOfFrames declares 2"),
+    ("basic", "Basic Offset Table names 1 frame; NumberOfFrames declares 2"),
     ("extended",
-     "Extended Offset Table names 1 frames; NumberOfFrames declares 2"),
+     "Extended Offset Table names 1 frame; NumberOfFrames declares 2"),
 ], ids=["populated-bot", "extended-table"])
 def test_only_a_file_with_no_offset_table_reaches_the_no_boundary_refusal(
         tmp_path, table, refusal):

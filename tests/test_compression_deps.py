@@ -294,7 +294,7 @@ def test_a_refusal_made_before_any_decoder_is_asked_gets_no_advice(
     assert rle_has_no_plugin["asked"] == 0
     assert str(error) == (
         f"Lazy load failed for instance {inst.sop_instance_uid}: "
-        f"RuntimeError: Basic Offset Table names 1 frames; NumberOfFrames "
+        f"RuntimeError: Basic Offset Table names 1 frame; NumberOfFrames "
         f"declares 2")
 
 

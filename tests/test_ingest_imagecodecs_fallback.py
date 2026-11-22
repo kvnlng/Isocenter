@@ -836,7 +836,7 @@ def test_the_lazy_load_error_carries_the_true_reason(tmp_path):
         inst.get_pixel_data()
     msg = str(exc.value)
     assert msg.startswith("Lazy load failed"), msg
-    assert msg.endswith(": Basic Offset Table names 1 frames; "
+    assert msg.endswith(": Basic Offset Table names 1 frame; "
                         "NumberOfFrames declares 2"), msg
     assert "imagecodecs" not in msg, msg
 

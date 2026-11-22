@@ -2142,7 +2142,7 @@ class Instance(DicomItem):
                 could not decode. Also from a file, when an encapsulated
                 pixel element's offset table names a different number of
                 frames from NumberOfFrames: `Lazy load failed for instance
-                <uid>: RuntimeError: <table> names N frames;
+                <uid>: RuntimeError: <table> names N frame(s);
                 NumberOfFrames declares M`. The message names the
                 instance, never the source file. Also from a file that
                 ingest would refuse, in ingest's words. Such a file has a

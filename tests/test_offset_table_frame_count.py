@@ -720,7 +720,7 @@ def test_an_icon_naming_fewer_frames_is_not_carried_and_says_why(tmp_path):
         assert details.startswith(
             f"Standard tag 7fe0,0010 (OB) at {ICON_PATH_WORDS} was not "
             f"ingested: "), details
-        assert "Basic Offset Table names 1 frames" in details, details
+        assert "Basic Offset Table names 1 frame" in details, details
         assert "NumberOfFrames declares 2" in details, details
         assert "unrouted" not in details, details
     finally:

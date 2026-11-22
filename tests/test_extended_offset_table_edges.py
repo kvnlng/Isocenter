@@ -350,11 +350,11 @@ def test_a_table_pydicom_walks_by_naming_fewer_is_still_refused(tmp_path):
     assert offset_table_frame_count(ds) == (
         1, 2, 2, "Extended Offset Table")
     assert ingest_worker(path)[-1] == (
-        "Extended Offset Table names 1 frames; NumberOfFrames declares 2")
+        "Extended Offset Table names 1 frame; NumberOfFrames declares 2")
     inst, read = _door(path, ds.SOPInstanceUID)
     assert str(read) == (
         f"Lazy load failed for instance {inst.sop_instance_uid}: "
-        f"RuntimeError: Extended Offset Table names 1 frames; "
+        f"RuntimeError: Extended Offset Table names 1 frame; "
         f"NumberOfFrames declares 2")
 
 
@@ -472,7 +472,7 @@ def test_a_table_pydicom_does_not_drop_is_still_counted(tmp_path, lengths):
 
     assert offset_table_frame_count(ds) == (1, 2, 2, "Extended Offset Table")
     assert ingest_worker(path)[-1] == (
-        "Extended Offset Table names 1 frames; NumberOfFrames declares 2")
+        "Extended Offset Table names 1 frame; NumberOfFrames declares 2")
 
 
 @pytest.mark.parametrize("lengths", [0, None], ids=["empty", "absent"])
@@ -490,7 +490,7 @@ def test_a_table_pydicom_does_not_drop_naming_fewer_is_not_asked_of_the_walk(
 
     assert offset_table_frame_count(ds) == (1, 2, 2, "Extended Offset Table")
     assert ingest_worker(path)[-1] == (
-        "Extended Offset Table names 1 frames; NumberOfFrames declares 2")
+        "Extended Offset Table names 1 frame; NumberOfFrames declares 2")
 
 
 # ---------------------------------------------------------------------------
@@ -691,7 +691,7 @@ def test_a_basic_offset_table_naming_fewer_answers_under_a_dropped_table(
 
     assert offset_table_frame_count(ds) == (1, 2, 2, "Basic Offset Table")
     assert ingest_worker(path)[-1] == (
-        "Basic Offset Table names 1 frames; NumberOfFrames declares 2")
+        "Basic Offset Table names 1 frame; NumberOfFrames declares 2")
 
 
 def test_one_fragment_under_an_agreeing_dropped_table_gains_the_clause(
@@ -749,7 +749,8 @@ def test_the_clause_is_not_said_of_a_table_pydicom_walks_by(
         f"NumberOfFrames declares {declared}: pydicom found no frame "
         f"boundary in them, so the declared frames cannot be read")
     assert ingest_worker(path)[-1] == (
-        f"Extended Offset Table names {size // 8} frames; NumberOfFrames "
+        f"Extended Offset Table names {size // 8} frame"
+        f"{'' if size // 8 == 1 else 's'}; NumberOfFrames "
         f"declares {declared}")
 
 

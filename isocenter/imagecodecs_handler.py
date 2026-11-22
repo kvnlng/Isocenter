@@ -999,16 +999,18 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
     # the row says only that: there is no end marker it was found by.
     # Spelled out rather than taken from `RLE_FRAGMENTS`, which is the
     # marker and not the phrase.
+    #
+    # "1 frame", never "1 frames" (#1087), for every subject.
+    frames = f"{table_frames} frame{'' if table_frames == 1 else 's'}"
     if table_name == RLE_FRAGMENTS:
-        counted_words = (f"{WALKED_FRAMES} hold {table_frames} frames, "
-                         f"one per fragment")
+        counted_words = f"{WALKED_FRAMES} hold {frames}, one per fragment"
     elif table_name == WALKED_FRAMES:
-        counted_words = (f"{table_name} hold {table_frames} frames by "
-                         f"their end markers")
+        counted_words = f"{table_name} hold {frames} by their end markers"
     elif table_name == NATIVE_FRAMES:
-        counted_words = f"{table_name} holds {table_frames} whole frames"
+        counted_words = (f"{table_name} holds {table_frames} whole "
+                         f"frame{'' if table_frames == 1 else 's'}")
     else:
-        counted_words = f"{table_name} names {table_frames} frames"
+        counted_words = f"{table_name} names {frames}"
     return f"{counted_words}; {declared_words}"
 
 
