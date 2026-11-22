@@ -5,6 +5,7 @@ goes through -- scanning, exporting, verification. It picks between three
 execution strategies and adapts to a set of `ISOCENTER_*` environment
 variables, so that tuning a cohort run never means editing code.
 """
+import collections
 import concurrent.futures
 import functools
 import itertools
@@ -408,6 +409,74 @@ def resolve_max_workers() -> int:
     return configured if configured is not None else (os.cpu_count() or 1)
 
 
+#: The time bound on one task of `ingest()` and `export()` when
+#: `ISOCENTER_TASK_TIMEOUT` is unset (owner ruling Q5 on #673, 2026-11-21).
+#: A legitimate multi-gigabyte multi-frame file on a slow disk was the
+#: scenario it was weighed against; the variable lifts it.
+_DEFAULT_TASK_TIMEOUT_S = 600
+
+
+def resolve_task_timeout() -> Optional[float]:
+    """The time bound on one task, in seconds, or None for no bound (#673).
+
+    `ISOCENTER_TASK_TIMEOUT`, a whole number of seconds; `0` means no
+    bound. Unset, negative or not a whole number: 600 (the last two with a
+    WARNING naming the variable).
+
+    Returns:
+        Optional[float]: The bound, or None.
+    """
+    # `minimum=0`, so `0` reaches here and is the "no bound" spelling; a
+    # bound of 0 s would stop every task at once. Read at each call's
+    # dispatch, not at import, so a value set after import applies, and once
+    # per call, so every round of one `ingest()` and the row it writes name
+    # the same bound.
+    configured = _env_int("ISOCENTER_TASK_TIMEOUT", minimum=0)
+    if configured is None:
+        return _DEFAULT_TASK_TIMEOUT_S
+    return configured or None
+
+
+class _TaskDidNotFinish(Exception):
+    """A task that ran past the time bound twice, the second time alone on a
+    fresh worker process, which was then stopped (#673).
+
+    Made in the parent, never pickled. Yielded in the task's place under
+    `yield_exceptions`, raised otherwise.
+
+    Attributes:
+        item: The item whose task did not finish.
+        bound (float): The bound, in seconds.
+    """
+
+    def __init__(self, item, bound):
+        super().__init__(
+            f"the task did not finish within the {bound:g} s bound "
+            f"(ISOCENTER_TASK_TIMEOUT), and run again alone on a fresh "
+            f"worker process it did not finish within it a second time; "
+            f"both workers were stopped")
+        self.item = item
+        self.bound = bound
+
+
+class _RanPastTheBound(BrokenProcessPool):
+    """A shared process pool whose workers were sent SIGKILL because the
+    caller waited on one task for longer than the bound (#673).
+
+    A `BrokenProcessPool`, because that is what the pool now is, and every
+    caller that survives a dead worker (`_ingest_results`) survives this.
+    It accuses no task: a pool runs several at once, and the one waited on
+    is only the likeliest.
+    """
+
+    def __init__(self, bound, waited):
+        super().__init__(
+            f"no result came back for {waited:.1f} s, past the {bound:g} s "
+            f"bound (ISOCENTER_TASK_TIMEOUT), so every worker process of "
+            f"the pool was sent SIGKILL")
+        self.bound = bound
+
+
 def _resolve_strategy(max_workers, chunksize, maxtasksperchild, disable_gc,
                       force_threads, show_progress, desc, total) -> _Strategy:
     """Settles every knob before any work starts.
@@ -762,7 +831,101 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
     return killed
 
 
-def _run_on_shared_executor(executor, func, items, strategy):
+class _HeadWatch:
+    """Ends a shared process pool's workers when its reader has waited on
+    one result for longer than the bound (#673).
+
+    `executor.map` hands out no future and no start time, so a task's own
+    running time cannot be read on a pool the caller shares. What can be
+    read is how long the reader has been blocked on the next result. On an
+    ordered `map` that result is the oldest task not returned, and every
+    task before it has returned, so it was the next one taken; the wait
+    can only be longer than its running time, never shorter. A stop is
+    therefore never early for the task waited on, and may be later.
+
+    It is a suspicion, not a verdict: the pool runs other tasks beside it,
+    and a peer `ingest()` sharing the pool may have queued its own tasks
+    ahead. The workers are sent SIGKILL, the reader's next result raises
+    `_RanPastTheBound`, and the caller's retry reads each file alone, where
+    the same watch is exact (owner ruling Q9).
+    """
+
+    def __init__(self, executor, bound):
+        self._executor = executor
+        self._bound = bound
+        # A float or None, written by the reader and read by the watch
+        # thread: one reference store, atomic on every build.
+        self._since = None
+        self._stop = threading.Event()
+        self.waited = None   # seconds waited when the watch fired
+        self._thread = threading.Thread(
+            target=self._watch, name="isocenter-task-bound", daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def close(self):
+        """Stop the watch thread; wait for it, bounded. Safe to call twice."""
+        self._stop.set()
+        if self._thread.ident is not None:
+            # Bounded: the thread wakes on the event at once, and at worst
+            # is mid-kill, which takes no lock the reader holds.
+            self._thread.join(5.0)
+
+    def wrap(self, iterator):
+        """Yield from `iterator`, timing each wait on the next result."""
+        while True:
+            self._since = time.monotonic()
+            try:
+                result = next(iterator)
+            except StopIteration:
+                return
+            except BrokenProcessPool as exc:
+                if self.waited is not None:
+                    raise _RanPastTheBound(self._bound, self.waited) from exc
+                raise
+            finally:
+                self._since = None
+            yield result
+
+    def _watch(self):
+        while not self._stop.is_set():
+            since = self._since
+            if since is not None:
+                waited = time.monotonic() - since
+                if waited >= self._bound:
+                    self._fire(waited)
+                    return
+                wait = min(self._bound - waited, _POOL_WATCH_S)
+            else:
+                wait = _POOL_WATCH_S
+            self._stop.wait(wait)
+
+    def _fire(self, waited):
+        # The workers of the executor handed in, read now: never a pool the
+        # session swapped in since, and never one idle between calls,
+        # because the watch runs only while its reader waits.
+        values = _workers_of(self._executor)
+        self.waited = waited
+        killed = _kill_each(values)
+        get_logger().warning(
+            "No result came back from a shared process pool for %.1f s, "
+            "past the %g s bound (ISOCENTER_TASK_TIMEOUT); its %d worker "
+            "process(es) were sent SIGKILL (pid %s). The tasks they held are "
+            "read again, each alone, before any is reported (#673).",
+            waited, self._bound, len(killed),
+            ", ".join(str(pid) for pid in killed))
+
+
+def _bounds_processes(executor) -> bool:
+    """Whether `executor` is a process pool whose workers a bound can end:
+    a `ProcessPoolExecutor`. A thread cannot be ended, and a caller's
+    `multiprocessing.Pool` is not ours to kill."""
+    return isinstance(executor, concurrent.futures.ProcessPoolExecutor)
+
+
+def _run_on_shared_executor(executor, func, items, strategy,
+                            task_timeout=None):
     """Uses an executor the caller owns, and does not shut it down.
 
     Args:
@@ -771,6 +934,10 @@ def _run_on_shared_executor(executor, func, items, strategy):
         func: The worker function.
         items: The items to process.
         strategy (_Strategy): Its `chunksize` and progress settings apply.
+        task_timeout (Optional[float]): With a `ProcessPoolExecutor`, the
+            seconds the reader may wait on one result before every worker
+            of the pool is sent SIGKILL and the stream raises
+            `_RanPastTheBound`. None: no bound.
 
     Yields:
         Each result, in submission order.
@@ -783,6 +950,9 @@ def _run_on_shared_executor(executor, func, items, strategy):
     # its manager thread holds until every worker has ended, and nothing
     # would be raised to reap on (#796).
     _end_broken_pool_stragglers(executor)
+    watch = None
+    if task_timeout is not None and _bounds_processes(executor):
+        watch = _HeadWatch(executor, task_timeout)
     try:
         # `map` is inside the `try` with the rest, though its own raise
         # leaves nothing to reap: `submit()` raises `BrokenProcessPool`
@@ -795,8 +965,15 @@ def _run_on_shared_executor(executor, func, items, strategy):
         # between two submits, it would block the next one behind a worker
         # that outlived SIGTERM, which nothing on this thread could end.
         iterator = mapper(func, items, chunksize=strategy.chunksize)
+        if watch is not None:
+            watch.start()
+            iterator = watch.wrap(iterator)
         yield from _tracked(iterator, items, strategy)
     finally:
+        # The watch first: it must not fire on a pool the owner is about to
+        # retire or hand to the next call.
+        if watch is not None:
+            watch.close()
         # On every way out, before the owner hears of it: the owner shuts
         # the pool down or retires it, and `shutdown()` takes the lock the
         # manager thread holds while it joins the workers. A future's
@@ -897,6 +1074,70 @@ def _wait_for_sentinels(processes, deadline) -> None:
             del waiting[sentinel]
 
 
+def _workers_of(executor) -> list:
+    """The worker processes of a `ProcessPoolExecutor`, read from its
+    private `_processes`, which the manager thread can change while it is
+    read; `[]` when there are none or it cannot be read."""
+    processes = getattr(executor, "_processes", None) or {}
+    for _ in range(3):
+        try:
+            return list(processes.values())
+        except RuntimeError:  # the dict changed while it was read
+            continue
+    return []
+
+
+def stop_process_pool(executor) -> list[int]:
+    """End a spawned process pool on a way out before its work is done.
+
+    For a pool the caller built and is leaving with work in flight: Ctrl-C,
+    a reader that stops, a worker that does not answer. Its exit,
+    `shutdown(wait=True)`, waits for good on a worker that never returns
+    (#673). Instead each worker is sent SIGTERM, one still running
+    `_BROKEN_POOL_GRACE_S` later is sent SIGKILL and named in one WARNING,
+    and then the pool is shut down without waiting. A Ctrl-C during the
+    wait sends the SIGKILL at once and goes on.
+
+    Args:
+        executor (concurrent.futures.ProcessPoolExecutor): The pool.
+
+    Returns:
+        list[int]: The pids sent SIGKILL, or `[]`.
+    """
+    processes = _workers_of(executor)
+    started = time.monotonic()
+    killed = []
+    try:
+        try:
+            for process in processes:
+                try:
+                    process.terminate()
+                except (OSError, ValueError, AttributeError):
+                    continue
+            _wait_for_sentinels(processes, started + _BROKEN_POOL_GRACE_S)
+        finally:
+            # A `finally`, never an `except`, and no `return` in it: a
+            # second Ctrl-C must reach the caller, and must not skip the
+            # kill (#861, round 2; review of #913).
+            killed = _kill_still_running(processes)
+            if killed:
+                # Not "after the pool was told to stop" nor "after the pool
+                # was found broken": tests count the other kill lines by
+                # those words.
+                get_logger().warning(
+                    "%d worker process(es) were still running %.1f s after "
+                    "they were sent SIGTERM as their pool was left with work "
+                    "in flight, and were sent SIGKILL (pid %s).",
+                    len(killed), time.monotonic() - started,
+                    ", ".join(str(pid) for pid in killed))
+    finally:
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+    return killed
+
+
 #: How often the recycling pool's stream wakes while it waits for a result,
 #: to look at workers that hold no task and at workers it has told to leave
 #: (#887, #885). It is the latency of seeing an idle worker die; a busy
@@ -962,9 +1203,10 @@ def _run_chunk(func, chunk) -> list:
 class _Slot:  # pylint: disable=too-few-public-methods
     """One one-worker executor of `_SlotPool`, and what it holds."""
 
-    __slots__ = ("executor", "process", "given", "inflight", "shut")
+    __slots__ = ("executor", "process", "given", "inflight", "shut",
+                 "submitted", "last_done", "alone")
 
-    def __init__(self, executor):
+    def __init__(self, executor, alone=False):
         self.executor = executor
         # The worker's process, captured once the first `submit()` has
         # spawned it: `shutdown()` sets the executor's `_processes` to None,
@@ -973,6 +1215,20 @@ class _Slot:  # pylint: disable=too-few-public-methods
         self.given = 0           # chunks handed to this worker, ever
         self.inflight = {}       # future -> (sequence, first index, chunk)
         self.shut = False        # `shutdown()` already called
+        # For the time bound (#673): when each future was handed over, and
+        # when this worker last returned one. One worker runs its chunks in
+        # the order given, so the chunk at the head of `inflight` began at
+        # the later of the two.
+        self.submitted = {}      # future -> time.monotonic() at submit
+        self.last_done = 0.0
+        # A worker opened to run one task again alone (owner ruling Q8):
+        # given nothing else, and not counted in the width.
+        self.alone = alone
+
+    def returned(self, _future):
+        """A future's done callback; runs on the executor's manager thread.
+        One float store, atomic on every build."""
+        self.last_done = time.monotonic()
 
 
 class _SlotPool:
@@ -994,6 +1250,13 @@ class _SlotPool:
             replaces one.
         disable_gc (bool): Disable the collector in each worker.
         depth (int): Chunks one worker holds at a time.
+        task_timeout (Optional[float]): Seconds one chunk may run (#673).
+            A chunk past it has its worker sent SIGKILL; the other chunk
+            that worker held is run again, and each item of the stopped
+            chunk is run once more, alone, on a fresh worker. An item past
+            the bound a second time comes back as `_TaskDidNotFinish`: as
+            a value under `yield_exceptions`, raised otherwise. None: no
+            bound.
 
     Raises:
         ValueError: `width` or `depth` below 1, or `recycle_after` neither
@@ -1024,7 +1287,7 @@ class _SlotPool:
     #    code: a worker whose initializer raises exits with code 0.
 
     def __init__(self, width, *, recycle_after, disable_gc,
-                 depth=_SLOT_DEPTH):
+                 depth=_SLOT_DEPTH, task_timeout=None):
         if not isinstance(width, int) or width < 1:
             raise ValueError(f"max_workers must be at least 1, not {width!r}")
         if recycle_after is not None and (
@@ -1042,6 +1305,16 @@ class _SlotPool:
         self._retiring = []   # (process, told to leave at): told to leave
         self._chunks = None
         self._func = None
+        self._bound = task_timeout
+        # The time bound's queues (#673). `_again`: chunks a stopped worker
+        # held behind the one that ran too long, which never started and
+        # are run again as they were. `_confirm`: one item each, of a chunk
+        # that ran too long, to run alone. `_pieces`: those items' results,
+        # gathered back into their chunk's sequence.
+        self._again = collections.deque()
+        self._confirm = collections.deque()
+        self._pieces = {}
+        self._yields_values = False
 
     def _started(self, process):
         """Called with each worker's process once it is spawned. A hook for
@@ -1061,6 +1334,8 @@ class _SlotPool:
         return chunk
 
     def _accepting(self, slot) -> bool:
+        if slot.alone:
+            return slot.given < 1
         return (self._recycle_after is None
                 or slot.given < self._recycle_after)
 
@@ -1082,8 +1357,9 @@ class _SlotPool:
                 self._started(slot.process)
         return slot.process
 
-    def _open(self):
-        slot = _Slot(new_spawn_process_pool(1, disable_gc=self._disable_gc))
+    def _open(self, alone=False):
+        slot = _Slot(new_spawn_process_pool(1, disable_gc=self._disable_gc),
+                     alone=alone)
         # Recorded before the first `submit()`, which spawns the worker, so
         # an exit that runs while it spawns still finds it.
         self._live.append(slot)
@@ -1102,6 +1378,8 @@ class _SlotPool:
             slot.inflight[_LostChunk()] = chunk
             return False
         slot.inflight[future] = chunk
+        slot.submitted[future] = time.monotonic()
+        future.add_done_callback(slot.returned)
         self._process_of(slot)
         return True
 
@@ -1110,16 +1388,27 @@ class _SlotPool:
         used up. Returns `[slot]` for the slot whose worker refused a
         chunk, or `[]`."""
         while True:
-            open_slots = [s for s in self._live if self._accepting(s)
+            if self._confirm:
+                # An item to run again alone goes first, each on a worker of
+                # its own that is given nothing else (owner ruling Q8). Not
+                # counted in the width: with `recycle_after` None no worker
+                # ever frees a place, and the item would wait for good.
+                piece = self._confirm.popleft()
+                slot = self._open(alone=True)
+                if not self._submit(slot, piece):
+                    return [slot]
+                continue
+            regular = [s for s in self._live if not s.alone]
+            open_slots = [s for s in regular if self._accepting(s)
                           and len(s.inflight) < self._depth]
             slot = min(open_slots, key=lambda s: len(s.inflight),
                        default=None)
             # A new worker before a second chunk to a busy one: spread first.
-            open_new = (len(self._live) < self._width
+            open_new = (len(regular) < self._width
                         and (slot is None or slot.inflight))
             if slot is None and not open_new:
                 return []
-            chunk = self._next_chunk()
+            chunk = self._again.popleft() if self._again else self._next_chunk()
             if chunk is None:
                 return []
             if open_new:
@@ -1294,6 +1583,7 @@ class _SlotPool:
         if not isinstance(chunksize, int) or chunksize < 1:
             raise ValueError(f"chunksize must be at least 1, not {chunksize!r}")
         self._func = func
+        self._yields_values = isinstance(func, _ExceptionAsResult)
         self._chunks = _numbered_chunks(items, chunksize)
         finished = False
         # Seen by `_end_open_slot_pools` at interpreter exit while it runs.
@@ -1344,6 +1634,7 @@ class _SlotPool:
             if not dead:
                 dead = self._ended([s for s in self._live if not s.inflight])
             if not dead:
+                self._stop_overdue(sink)
                 self._end_late_leavers(time.monotonic())
                 dead = self._fill()
             if dead:
@@ -1392,11 +1683,116 @@ class _SlotPool:
                         dead.append(slot)
                     continue
                 sequence, _, _ = slot.inflight.pop(future)
-                sink(sequence, exc if exc is not None else future.result())
+                slot.submitted.pop(future, None)
+                self._deliver(sequence,
+                              exc if exc is not None else future.result(),
+                              sink)
             if (slot not in dead and not slot.inflight
                     and not self._accepting(slot)):
                 self._retire(slot)
         return dead
+
+    # --- the time bound (#673) ----------------------------------------------
+
+    def _deliver(self, sequence, outcome, sink):
+        """Hand a chunk's outcome to `sink`; an item run alone is gathered
+        into its chunk's sequence first, and handed over when the last of
+        them is in. A task's exception settles the whole chunk at once."""
+        if not isinstance(sequence, tuple):
+            sink(sequence, outcome)
+            return
+        _, whole, index = sequence
+        held = self._pieces.get(whole)
+        if held is None:     # already settled by an exception
+            return
+        if isinstance(outcome, BaseException):
+            del self._pieces[whole]
+            sink(whole, outcome)
+            return
+        held["results"][index] = outcome[0]
+        held["left"] -= 1
+        if not held["left"]:
+            del self._pieces[whole]
+            sink(whole, held["results"])
+
+    def _stop_overdue(self, sink):
+        """Stop every worker whose running chunk is past the bound."""
+        if self._bound is None:
+            return
+        now = time.monotonic()
+        for slot in list(self._live):
+            head = next(iter(slot.inflight), None)
+            if head is None or isinstance(head, _LostChunk) or head.done():
+                continue
+            # The later of its handover and its predecessor's return: a
+            # chunk queued behind another in the same worker is not running
+            # yet, and its wait is not its own.
+            began = max(slot.submitted.get(head, now), slot.last_done)
+            if now - began >= self._bound:
+                self._stop(slot, head, now - began, sink)
+
+    def _stop(self, slot, head, ran, sink):
+        """SIGKILL the slot's worker, whose chunk `head` ran `ran` seconds:
+        that chunk's items go to be run again alone, or, run alone already,
+        are reported; any other chunk it held never started, and is run
+        again as it was."""
+        process = self._process_of(slot)
+        killed = _kill_each([process]) if process is not None else []
+        # Watched like a worker told to leave, so the exits and the late
+        # kill see it until its sentinel says it has gone.
+        if process is not None:
+            self._retiring.append((process, time.monotonic()))
+        self._live.remove(slot)
+        slot.shut = True
+        held = list(slot.inflight.items())
+        slot.inflight.clear()
+        slot.submitted.clear()
+        again = []
+        for future, chunk in held:
+            if future.done() and not isinstance(future.exception(),
+                                                BrokenProcessPool):
+                # It returned as the kill was sent; it is not overdue.
+                self._deliver(chunk[0], future.exception() or future.result(),
+                              sink)
+            elif future is not head:
+                again.append(chunk)
+            elif slot.alone:
+                item = chunk[2][0]
+                marker = _TaskDidNotFinish(item, self._bound)
+                self._deliver(chunk[0],
+                              [marker] if self._yields_values else marker,
+                              sink)
+            else:
+                sequence, start, items = chunk
+                self._pieces[sequence] = {"results": [None] * len(items),
+                                          "left": len(items)}
+                for index, item in enumerate(items):
+                    self._confirm.append(
+                        (("piece", sequence, index), start + index, [item]))
+        self._again.extendleft(reversed(again))
+        try:
+            # After the kill, so the manager thread has no live worker to
+            # join while it holds the lock `shutdown()` takes.
+            slot.executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        pids = ", ".join(str(pid) for pid in killed) or "unknown"
+        # Neither "after the pool was told to stop" nor "had finished their
+        # tasks": tests count the two exit lines by those words.
+        if slot.alone:
+            get_logger().warning(
+                "A task ran for %.1f s, past the %g s bound "
+                "(ISOCENTER_TASK_TIMEOUT), a second time, alone on a fresh "
+                "worker process; that worker was sent SIGKILL (pid %s), and "
+                "the task is reported as not finished (#673).",
+                ran, self._bound, pids)
+        else:
+            get_logger().warning(
+                "A task ran for %.1f s, past the %g s bound "
+                "(ISOCENTER_TASK_TIMEOUT); its worker process was sent "
+                "SIGKILL (pid %s), and each of its items is run once more, "
+                "alone, on a fresh worker process before any is reported "
+                "(#673).", ran, self._bound, pids)
 
     # --- exits ------------------------------------------------------------
 
@@ -1529,7 +1925,8 @@ def _end_open_slot_pools():
 threading._register_atexit(_end_open_slot_pools)  # pylint: disable=protected-access
 
 
-def _run_on_recycling_pool(func, items, strategy, ordered=False):
+def _run_on_recycling_pool(func, items, strategy, ordered=False,
+                           task_timeout=None):
     """Runs on one-worker spawned pools, each replaced after N tasks.
 
     Args:
@@ -1539,6 +1936,7 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
             `disable_gc`, `chunksize` and progress settings apply.
         ordered (bool): Yield in submission order rather than as workers
             finish.
+        task_timeout (Optional[float]): `_SlotPool`'s time bound.
 
     Yields:
         Each result, as workers finish unless `ordered`.
@@ -1555,7 +1953,8 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
     # its results are small and order-free.
     pool = _SlotPool(strategy.max_workers,
                      recycle_after=strategy.maxtasksperchild,
-                     disable_gc=strategy.disable_gc)
+                     disable_gc=strategy.disable_gc,
+                     task_timeout=task_timeout)
     stream = pool.run(func, items, strategy.chunksize, ordered)
     try:
         yield from _tracked(stream, items, strategy)
@@ -1622,7 +2021,8 @@ def run_parallel(
     return_generator: bool = False,  # Implement streaming
     yield_exceptions: bool = False,  # Exceptions come back as values
     strategy: Optional[_Strategy] = None,  # Already resolved by the caller
-    ordered: bool = False  # Submission order on the recycling pool too
+    ordered: bool = False,  # Submission order on the recycling pool too
+    task_timeout: Optional[float] = None  # Seconds per task (#673)
 ) -> Any:  # Union[List[R], Iterator[R]]
     """
     Executes `func(item)` in parallel using multiple processes or threads.
@@ -1682,6 +2082,19 @@ def run_parallel(
             (`executor.map`, or a Pool's `imap`) and the per-call
             executor path (`executor.map`) are ordered already, so it
             changes nothing there.
+        task_timeout (float, optional): Seconds one task may run before
+            its worker process is stopped (#673); None, the default, is no
+            bound. The caller passes `resolve_task_timeout()`; only
+            `ingest()` and `export()` do. On the recycling pool a chunk
+            past it is stopped and each of its items run once more alone
+            on a fresh worker, and an item past it again comes back as a
+            `_TaskDidNotFinish` (yielded under `yield_exceptions`, raised
+            otherwise). On a shared `ProcessPoolExecutor` every worker is
+            sent SIGKILL when the reader has waited on one result for
+            longer, and the stream fails with `_RanPastTheBound`, a
+            `BrokenProcessPool`. Not applied to threads, which cannot be
+            ended, nor to a pool this call builds without
+            `maxtasksperchild`.
 
     Returns:
         Union[List[R], Iterator[R]]: The results of the parallel
@@ -1710,9 +2123,11 @@ def run_parallel(
     _announce_recycling_override(strategy)
 
     if executor is not None:
-        results = _run_on_shared_executor(executor, func, items, strategy)
+        results = _run_on_shared_executor(executor, func, items, strategy,
+                                          task_timeout)
     elif strategy.maxtasksperchild is not None:
-        results = _run_on_recycling_pool(func, items, strategy, ordered)
+        results = _run_on_recycling_pool(func, items, strategy, ordered,
+                                         task_timeout)
     else:
         results = _run_on_new_executor(func, items, strategy)
 

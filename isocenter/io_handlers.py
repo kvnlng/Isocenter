@@ -146,7 +146,9 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   refusal_before_decode,
                                   validate_without_the_table)
 from .parallel import (run_parallel, _resolve_strategy,
-                       new_spawn_process_pool)
+                       new_spawn_process_pool, resolve_task_timeout,
+                       stop_process_pool, _RanPastTheBound,
+                       _TaskDidNotFinish)
 from .validation import IODValidator
 from .sidecar import SidecarManager
 from .waveform import filter_dangling_annotation_refs
@@ -4535,6 +4537,27 @@ _NO_INGEST_WORKER_STARTS = (
     "killed as it starts")
 
 
+#: The reason a file is failed with when it was not returned before a worker
+#: process ended or was stopped, and then a fresh one-worker pool, which had
+#: run a trivial task and nothing else, did not return it within the time
+#: bound as the first file it was given (#673; owner rulings Q7, Q8). Takes
+#: `bound`. A constant because tests match its prefix and the CHANGELOG
+#: quotes it.
+_RAN_PAST_THE_BOUND = (
+    "An ingest worker process ended or was stopped before this file was "
+    "returned, and a fresh worker process given this file alone, as its "
+    "first file, did not return it within the {bound:g} s bound "
+    "(ISOCENTER_TASK_TIMEOUT) and was stopped")
+
+#: The least time the trivial task ahead of a one-at-a-time round gets,
+#: whatever the bound (#673). It runs on a worker that has only just been
+#: spawned, and a spawn that imports numpy and pydicom has been measured
+#: at seconds under load: starting a process is not reading a file, and a
+#: short bound must not make every file left "not read". No variable;
+#: tests patch it.
+_CANARY_FLOOR_S = 60
+
+
 def _failed_result(fp, reason):
     """`ingest_worker`'s tuple for a failed file, built in the parent.
 
@@ -4622,6 +4645,17 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     retry_strategy = dataclasses.replace(
         strategy, show_progress=False, threads_request_overridden_by=None,
         chunksize=1)
+    # One bound for every round of this call, so each round and the row it
+    # writes name the same one (#673). Round 0, on the shared pool, is timed
+    # by how long this call waits on one file (`parallel._HeadWatch`), which
+    # accuses no file: a stop there writes no row and sends the files not
+    # yet returned to the one-at-a-time rounds below, where one worker
+    # reads one file and the same watch is exact (owner ruling Q9). Only a
+    # file not returned in time by a fresh worker that ran the trivial task
+    # and then this file first is rejected; that is its second run past the
+    # bound, the first being the stop that sent it here (owner ruling Q8).
+    bound = resolve_task_timeout()
+    canary_bound = None if bound is None else max(bound, _CANARY_FLOOR_S)
     pending = list(files)
     first = True
     alone = 0          # > 0: read this many of `pending` one at a time
@@ -4631,6 +4665,11 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
         failure = None
         cannot_start = None
         delivered = 0
+        # Whether the round ended with nothing in flight. Any other way out
+        # (Ctrl-C, a reader that stops, a trivial task that never returned)
+        # leaves a worker that may never return, and `shutdown(wait=True)`
+        # would wait on it for good (#673).
+        settled = False
         try:
             if first:
                 round_executor, batch = executor, pending
@@ -4659,10 +4698,17 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                     # a builtin: it pickles by reference and touches no
                     # file.
                     try:
-                        pool.submit(os.getpid).result()
+                        pool.submit(os.getpid).result(timeout=canary_bound)
                         canary_deaths = 0
                     except BrokenProcessPool as exc:
                         cannot_start = exc
+                    except concurrent.futures.TimeoutError:
+                        # A worker that cannot run `os.getpid` in that time
+                        # is stuck starting, not reading: counted as one
+                        # that cannot start. The `finally` ends it.
+                        cannot_start = TimeoutError(
+                            f"a trivial task did not return within "
+                            f"{canary_bound:g} s")
             if cannot_start is None:
                 # `yield_exceptions=True` changes nothing for a file that
                 # raises -- `ingest_worker` catches its own exceptions --
@@ -4673,15 +4719,21 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                                            return_generator=True,
                                            ordered=True,
                                            yield_exceptions=True,
-                                           strategy=round_strategy):
+                                           strategy=round_strategy,
+                                           task_timeout=bound):
                     if isinstance(result, Exception):
                         failure = result
                         break
                     delivered += 1
                     yield result
+                settled = True
         finally:
             if pool is not None:
-                pool.shutdown(wait=True, cancel_futures=True)
+                if settled:
+                    # Every worker answered or ended: nothing to wait on.
+                    pool.shutdown(wait=True, cancel_futures=True)
+                else:
+                    stop_process_pool(pool)
         if cannot_start is not None and not canary_deaths:
             # Once is not "no worker can start": a worker killed as it
             # started for a reason of the moment would otherwise cost every
@@ -4730,6 +4782,16 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 "%d file(s) one at a time; reading on from the file it held, "
                 "first on another fresh worker.",
                 describe_exception(failure), delivered)
+            continue
+        if alone and isinstance(failure, _RanPastTheBound):
+            # One worker, behind the canary, and this file first: the file
+            # it was stopped on is the file not returned in time (#673).
+            # Its own row; never `_WORKER_ENDED_READING`, which says the
+            # worker ended on its own.
+            yield _failed_result(batch[0],
+                                 _RAN_PAST_THE_BOUND.format(bound=bound))
+            pending = pending[1:]
+            alone = 0
             continue
         if alone:
             # One worker, and it had run the canary and nothing else: the
@@ -13496,6 +13558,34 @@ def _numeric_arm(vr, value):
     raise ValueError(f"the value fits no numeric arm of {vr}")
 
 
+def _outcome_of_a_task_not_finished(stopped) -> "ExportOutcome":
+    """The failed `ExportOutcome` for an instance whose export did not
+    finish within the time bound twice (#673; owner ruling Q7).
+
+    Args:
+        stopped (_TaskDidNotFinish): The pool's report; its `item` is the
+            `ExportContext`.
+
+    Returns:
+        ExportOutcome: `ok=False`, its UID and plan position, and an
+        `error` naming the bound and no path.
+    """
+    ctx = stopped.item
+    # Text, not the exception: `_report_export_failures` keeps a string as
+    # given, and the class name would add nothing a reader needs. It names
+    # no path (the output path is `Subject_<Patient ID>/...`).
+    return ExportOutcome(
+        ok=False, output_path=getattr(ctx, "output_path", None),
+        sop_instance_uid=getattr(getattr(ctx, "instance", None),
+                                 "sop_instance_uid", None),
+        error=(f"its export did not finish within the {stopped.bound:g} s "
+               f"bound (ISOCENTER_TASK_TIMEOUT), and run again alone on a "
+               f"fresh worker process it did not finish within it a second "
+               f"time; both workers were stopped, and no file was written "
+               f"under its name"),
+        position=getattr(ctx, "position", None))
+
+
 def _in_plan_order(results) -> list:
     """`results` sorted by plan position, stably (#999).
 
@@ -14041,7 +14131,18 @@ class DicomExporter:
             # Same reason as `write_tree`: `_report_export_failures`'
             # Exception arm is unreachable without it, and a lost worker
             # would take the whole batch's accounting with it.
-            yield_exceptions=True)
+            yield_exceptions=True,
+            # Read here, once per export (#673). It reaches the recycling
+            # pool `session.export()` always asks for; `write_tree()`'s
+            # pool takes none (it is threads on a free-threaded build).
+            task_timeout=resolve_task_timeout())
+        # An instance not written in time, twice, comes back from the pool
+        # as `_TaskDidNotFinish` holding its context: an outcome naming it,
+        # in its place in the plan, so its row is keyed on its UID and not
+        # UNKNOWN.
+        results = (_outcome_of_a_task_not_finished(r)
+                   if isinstance(r, _TaskDidNotFinish) else r
+                   for r in results)
 
         # Two passes -- see the note in `write_tree`.
         #
