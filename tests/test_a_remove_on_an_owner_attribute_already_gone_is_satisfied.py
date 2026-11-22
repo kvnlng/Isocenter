@@ -115,12 +115,14 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
     since #544. Since #952 a `REPLACE` on an instance's own element that
     already holds the value, with the instance's remediation record to
     vouch for it, is satisfied, and the record survives the save and the
-    reopen: twenty-eight of the thirty-four are satisfied. The six left
-    are the owner-level arms, which #952 does not change: each patient's
-    Patient ID, each Study's UID and each Series' UID, written again onto
-    the value already there. Lose the pseudonym lookup and the pass does
-    not become quiet -- it declines every finding, which `_owner_rows`
-    now sees and this count would fail on either way.
+    reopen: twenty-eight of the thirty-four were satisfied. The six left
+    were the owner-level arms: each patient's Patient ID, each Study's UID
+    and each Series' UID, written again onto the value already there.
+    Since #990 an owner that holds this store's mint, every instance copy
+    of which holds it with its record, is satisfied too, so the count is
+    0 and the pass writes no row. Lose the pseudonym lookup and the pass
+    does not become quiet -- it declines every finding, which
+    `_owner_rows` sees and this count would fail on either way.
     """
     with _session(tmp_path) as session:
         report = session.audit()
@@ -134,10 +136,11 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
         before = len(_rows(second))
 
         # The UID replacements (#544): fourteen findings over the two
-        # files. Each instance's copy of its Study and Series Instance UID
-        # folds into the owner's write, and the owners' four are among the
-        # six still re-applied; the instances' own six (SOP Instance UID,
-        # Instance Creator UID, Frame of Reference UID) are satisfied.
+        # files. The owners' four are satisfied (#990), so their write no
+        # longer reaches the instances' copies of the Study and Series
+        # Instance UID, which hold it with its record and are satisfied
+        # too; the instances' own six (SOP Instance UID, Instance Creator
+        # UID, Frame of Reference UID) are satisfied (#952).
         uids = sorted((f.entity_type, f.tag) for f in report.findings
                       if f.remediation_proposal is not None
                       and f.remediation_proposal.metadata.get("uid_replacement"))
@@ -145,17 +148,10 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
             [("Instance", tag) for tag in ("0008,0014", "0008,0018", "0020,000d",
                                            "0020,000e", "0020,0052")] * 2
             + [("Series", "0020,000e"), ("Study", "0020,000d")] * 2), uids
-        assert second.anonymize(report) == 6
+        assert second.anonymize(report) == 0
 
         rows = _rows(second)[before:]
-        assert [a for a, _ in rows].count("REMEDIATION_DECLINED") == 0, rows
-        applied = [(a, d) for a, d in rows if a.startswith("REMEDIATION_")]
-        assert [a for a, _ in applied] == ["REMEDIATION_REPLACE"] * 6, applied
-        assert sorted(field for _, d in applied
-                      for field in ("patient_id", "study_instance_uid",
-                                    "series_instance_uid")
-                      if f": {field} -> " in d) == sorted(
-            ["patient_id", "study_instance_uid", "series_instance_uid"] * 2), applied
+        assert [a for a, _ in rows if a.startswith("REMEDIATION_")] == [], rows
         assert _owner_rows(second, before) == []
 
 
