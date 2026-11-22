@@ -20,6 +20,7 @@ import multiprocessing
 import os
 import pathlib
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -249,8 +250,12 @@ def test_a_death_names_the_chunks_it_lost(tmp_path, monkeypatch,
 
     Two workers, chunksize 2, depth 2: worker A holds chunks 0 and 2, B
     holds 1 and 3, and the item -4 in chunk 1 ends B once chunks 0 and 2
-    have run. Killing mutations: `lost` taken from every future in flight;
-    the exit code read before the sentinel is ready.
+    have run. Killing mutation: `lost` left empty, or taken from a chunk
+    the worker did not hold. Neither `lost` taken from every live slot
+    (A's last chunk has returned by then; see
+    `test_a_death_does_not_name_a_chunk_a_healthy_worker_still_holds`) nor
+    the exit code read before the sentinel is ready (the executor fails the
+    future only once it has seen the worker end) is killed here.
     """
     markers = tmp_path / "markers"
     markers.mkdir()
@@ -594,3 +599,387 @@ def test_retired_workers_give_their_threads_and_descriptors_back():
         time.sleep(0.1)
     # Each number on its own: a tuple compares by its first difference.
     assert not grown(), (before, counts())
+
+
+def test_the_slot_depth_is_the_owner_ruled_two():
+    """`_SLOT_DEPTH` is 2 by owner ruling (Q1 on #885, 2026-11-21): T0
+    measured the export at depth 2 against `multiprocessing.Pool`, and a
+    deeper slot holds more chunks a death loses. Changing it is a ruling,
+    not a tuning.
+
+    Killing mutation: any other depth.
+    """
+    assert parallel._SLOT_DEPTH == 2  # pylint: disable=protected-access
+
+
+def test_a_finished_worker_that_cannot_leave_is_ended_while_the_stream_runs(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """A worker that ran its quota and cannot leave is SIGKILLed about
+    `_BROKEN_POOL_GRACE_S` after it was told to leave, while the stream is
+    still running, not when the stream ends (Q2 on #885).
+
+    One worker at a time, one chunk each: the first returns at once and is
+    told to leave; the second runs 8 s. The grace is 1 s, so the first is
+    killed some 7 s before the stream ends.
+
+    Killing mutation: the late-leaver check removed from the stream's loop,
+    leaving only the one in the finished exit.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    monkeypatch.setattr(parallel, "_POOL_WATCH_S", 0.2)
+    initializer = functools.partial(_cannot_leave, str(markers))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            _sleep_then_die_at, [(0, 0.0, None), (1, 8.0, None)],
+            max_workers=1, maxtasksperchild=1, show_progress=False), 90)
+        ended = time.time()
+
+    assert not outcome["hung"], outcome
+    assert "error" not in outcome, outcome
+    assert sorted(outcome["value"]) == [0, 1]
+    records = _late_leaver_records(caplog)
+    assert records, [r.getMessage() for r in caplog.records]
+    first = min(records, key=lambda r: r.created)
+    assert ended - first.created > 4, (
+        "the worker that finished first was killed only "
+        f"{ended - first.created:.1f} s before the stream ended")
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+
+
+def test_a_death_does_not_name_a_chunk_a_healthy_worker_still_holds(
+        recorded_pools):
+    """`lost` names only what the dead worker held: a chunk another, healthy
+    worker is still running is not lost, and is not run again by #668.
+
+    Two workers: item 0 ends its worker after 0.5 s; item 1 runs 8 s in the
+    other and is still running when the death is seen.
+
+    Killing mutation: `lost` taken from every live slot's chunks.
+    """
+    items = [(0, 0.5, 0), (1, 8.0, None)]
+    outcome = _run_bounded(lambda: parallel.run_parallel(
+        _sleep_then_die_at, items, max_workers=2, maxtasksperchild=25,
+        show_progress=False, yield_exceptions=True), 60)
+
+    assert not outcome["hung"], outcome
+    exc = outcome["value"][-1]
+    _, _, code = _broken_message(exc)
+    assert code == 13, exc
+    assert exc.lost == ((0, [items[0]]),), exc.lost
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+
+
+class _FakeProcess:
+    """A worker process whose sentinel is a pipe: it has ended once the
+    write end is closed."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.sentinel, self._write = os.pipe()
+        self.exitcode = None
+
+    def end(self, code):
+        if self.exitcode is None:
+            self.exitcode = code
+            os.close(self._write)
+
+    def terminate(self):
+        self.end(-signal.SIGTERM)
+
+    def kill(self):
+        self.end(-signal.SIGKILL)
+
+
+class _FakeExecutor:
+    """A one-worker executor whose futures the test settles. `plan` maps an
+    item to what its chunk's future is at `submit()`: `"broken"` (failed
+    with `BrokenProcessPool`, the worker ended with code 13),
+    `"broken, not yet ended"` (failed, its sentinel not ready yet),
+    `"pending"`, or `"pending, ended"` (pending, with the worker ended)."""
+
+    def __init__(self, plan, made):
+        self._plan = plan
+        self.process = _FakeProcess(90000 + len(made))
+        self._processes = {self.process.pid: self.process}
+        self.futures = {}
+        made.append(self)
+
+    def submit(self, _fn, _func, chunk):
+        future = concurrent.futures.Future()
+        future.set_running_or_notify_cancel()
+        what = self._plan[chunk[0]]
+        if what == "broken":
+            self.process.end(13)
+            future.set_exception(BrokenProcessPool("gone"))
+        elif what == "broken, not yet ended":
+            future.set_exception(BrokenProcessPool("gone"))
+        elif what == "pending, ended":
+            self.process.end(13)
+        self.futures[chunk[0]] = future
+        return future
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        del wait, cancel_futures
+        self._processes = None
+
+
+@pytest.fixture
+def fake_slots(monkeypatch):
+    """`_SlotPool` over `_FakeExecutor`s: yields `(made, use)`, where
+    `use(plan)` sets the plan every executor opened from then on reads."""
+    made = []
+    plan = {}
+    monkeypatch.setattr(
+        parallel, "new_spawn_process_pool",
+        lambda width, disable_gc=False: _FakeExecutor(plan, made))
+    monkeypatch.setattr(parallel, "_POOL_WATCH_S", 0.05)
+    try:
+        yield made, plan.update
+    finally:
+        for executor in made:
+            executor.process.end(0)
+            os.close(executor.process.sentinel)
+
+
+def _drain(stream):
+    """Every value the stream yields before it raises, and what it raised."""
+    values = []
+    try:
+        for value in stream:
+            values.append(value)
+    except BrokenProcessPool as exc:
+        return values, exc
+    return values, None
+
+
+def _fake_pool():
+    return parallel._SlotPool(  # pylint: disable=protected-access
+        2, recycle_after=None, disable_gc=False, depth=1)
+
+
+def test_every_worker_that_died_in_the_same_wake_has_its_chunks_in_lost(
+        fake_slots):
+    """Two workers' futures fail together: `lost` is the union of what
+    both held, not the first worker's alone (Q-B on #1199). The second
+    worker's sentinel is not ready yet, so only its failed future says it
+    died.
+
+    Killing mutation: only the first dead slot read by `_settle`.
+    """
+    _, use = fake_slots
+    use({10: "broken", 20: "broken, not yet ended"})
+
+    values, exc = _drain(_fake_pool().run(identity, [10, 20], 1, False))
+
+    assert values == []
+    assert exc is not None and exc.lost == ((0, [10]), (1, [20])), exc
+
+
+def test_a_worker_found_ended_beside_a_death_has_its_chunks_in_lost(
+        fake_slots):
+    """One worker's future fails; the other's worker has ended too, but its
+    future is not failed yet (the executor's manager thread marks it). Both
+    workers' chunks are lost, so both are named (Q-B on #1199).
+
+    Killing mutation: the sentinel read of the other live slots removed
+    from the death's handling.
+    """
+    _, use = fake_slots
+    use({10: "broken", 20: "pending, ended"})
+
+    values, exc = _drain(_fake_pool().run(identity, [10, 20], 1, False))
+
+    assert values == []
+    assert exc is not None and exc.lost == ((0, [10]), (1, [20])), exc
+
+
+def test_a_result_returned_as_a_death_is_seen_is_delivered_before_it(
+        fake_slots, monkeypatch):
+    """A result another worker returned just after the wait that saw a
+    death is delivered before `BrokenProcessPool`, and is not in `lost`.
+
+    The wait is wrapped so worker B's future completes the moment worker
+    A's failed one is handed back, as the executors' threads race in a real
+    run.
+
+    Killing mutation: the other workers' finished futures not settled
+    before the death is raised.
+    """
+    made, use = fake_slots
+    use({10: "broken", 20: "pending"})
+    real_wait = concurrent.futures.wait
+
+    def wait_then_b_returns(futures, timeout=None, return_when=None):
+        done, not_done = real_wait(futures, timeout=timeout,
+                                   return_when=return_when)
+        late = made[1].futures[20]
+        if not late.done():
+            late.set_result([40])
+        return done, not_done
+
+    monkeypatch.setattr(concurrent.futures, "wait", wait_then_b_returns)
+
+    values, exc = _drain(_fake_pool().run(identity, [10, 20], 1, False))
+
+    assert values == [40]
+    assert exc is not None and exc.lost == ((0, [10]),), exc
+
+
+def test_a_result_returned_before_a_refused_submit_is_delivered_before_it(
+        fake_slots, monkeypatch):
+    """A worker that is found dead when it is handed its next chunk fails
+    the stream; the results already returned are delivered before
+    `BrokenProcessPool`.
+
+    Both first chunks return; then the executor handed chunk 30 refuses it.
+
+    Killing mutation: a death seen by `_fill` raised before the results
+    already in hand are yielded.
+    """
+    made, use = fake_slots
+    use({10: "pending", 20: "pending", 30: "pending"})
+    real_submit = _FakeExecutor.submit
+
+    def submit(self, fn, func, chunk):
+        if chunk[0] == 30:
+            raise BrokenProcessPool("refused")
+        future = real_submit(self, fn, func, chunk)
+        future.set_result([chunk[0] * 2])
+        return future
+
+    monkeypatch.setattr(_FakeExecutor, "submit", submit)
+
+    values, exc = _drain(_fake_pool().run(identity, [10, 20, 30], 1, False))
+
+    assert sorted(values) == [20, 40]
+    assert exc is not None and exc.lost == ((2, [30]),), exc
+    assert len(made) == 2
+
+
+_LEFT_OPEN_AT_EXIT = '''
+import sys
+import threading
+import time
+
+from isocenter import parallel
+
+
+def stay():
+    """A worker that cannot leave by its sentinel: a thread that is not a
+    daemon holds it."""
+    threading.Thread(target=time.sleep, args=(3600,), daemon=False).start()
+
+
+def slow(seconds):
+    time.sleep(seconds)
+    return seconds
+
+
+if __name__ == "__main__":
+    parallel._BROKEN_POOL_GRACE_S = 1.0
+    parallel.resolve_worker_initializer = lambda disable_gc=False: stay
+    STREAM = parallel.run_parallel(
+        slow, [0.0] + [3600.0] * 3, max_workers=2, maxtasksperchild=25,
+        show_progress=False, return_generator=True)
+    print("first", next(STREAM), flush=True)
+    if sys.argv[1] == "interrupt":
+        # The parent's own work on a result: a Ctrl-C lands here, in the
+        # consumer, not in the pool's wait, and is not caught.
+        time.sleep(3600)
+    sys.exit(0)
+'''
+
+
+@pytest.mark.parametrize("how", ["exit", "interrupt"])
+def test_an_interpreter_exit_with_a_stream_left_open_ends_its_workers(
+        tmp_path, how):
+    """A script that leaves a recycling stream open (held in a global, or
+    by the traceback of a Ctrl-C in its loop) and exits does exit, within
+    a bound, with no worker left (Q-A on #1199).
+
+    The workers hold hour-long tasks and cannot leave by their sentinel.
+    `concurrent.futures`' own exit hook joins every executor's manager
+    thread, which waits for those tasks; `parallel._end_open_slot_pools`
+    must run first. This runs a real interpreter exit, so the order of the
+    two hooks is measured on each interpreter the gate runs.
+
+    Killing mutations: the hook not registered; registered with `atexit`
+    (which runs after the joins); the pool never added to the set.
+    """
+    script = tmp_path / "left_open.py"
+    script.write_text(_LEFT_OPEN_AT_EXIT, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("COVERAGE_")}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    started = time.monotonic()
+    child = subprocess.Popen(  # pylint: disable=consider-using-with
+        [sys.executable, str(script), how],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        start_new_session=True, text=True)
+    try:
+        if how == "interrupt":
+            assert child.stdout.readline().startswith("first"), "no result"
+            time.sleep(1.0)
+            os.kill(child.pid, signal.SIGINT)
+        try:
+            out, err = child.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the interpreter did not exit within 60 s with a "
+                        "recycling stream left open")
+    finally:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        child.wait()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 60, elapsed
+    if how == "exit":
+        assert child.returncode == 0, (child.returncode, err)
+        assert out.startswith("first 0.0"), (out, err)
+    else:
+        assert "KeyboardInterrupt" in err, err
+    assert "Exception ignored" not in err, err
+
+
+class _RemoveInterrupted(list):
+    """A slot list whose `remove()` is where a Ctrl-C lands."""
+
+    def remove(self, value):
+        raise KeyboardInterrupt
+
+
+def test_a_ctrl_c_as_a_worker_is_retired_leaves_it_watched_once(
+        fake_slots):
+    """A Ctrl-C between watching a retired worker and dropping it from the
+    live slots leaves it in at least one list the unfinished exit reads,
+    and that exit signals it once, not once per list.
+
+    Killing mutations: the worker dropped from the live slots before it is
+    watched (a Ctrl-C there leaves it in neither list, and no exit ends
+    it); the exit's processes not made unique.
+    """
+    made, use = fake_slots
+    use({10: "pending"})
+    pool = _fake_pool()
+    pool._func = identity  # pylint: disable=protected-access
+    slot = pool._open()  # pylint: disable=protected-access
+    assert pool._submit(slot, (0, 0, [10]))  # pylint: disable=protected-access
+    process = made[0].process
+    signals = []
+    process.terminate = lambda: signals.append("TERM")
+    pool._live = _RemoveInterrupted(pool._live)  # pylint: disable=protected-access
+
+    with pytest.raises(KeyboardInterrupt):
+        pool._retire(slot)  # pylint: disable=protected-access
+
+    assert process in [p for p, _ in pool._retiring]  # pylint: disable=protected-access
+    process.end(0)
+    pool._unfinished_exit()  # pylint: disable=protected-access
+    assert signals == ["TERM"], signals

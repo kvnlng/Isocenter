@@ -13,7 +13,9 @@ import signal
 import sys
 import multiprocessing
 import multiprocessing.connection
+import threading
 import time
+import weakref
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import (Callable, Iterable, Iterator, Any, NamedTuple,
@@ -1105,7 +1107,8 @@ class _SlotPool:
 
     def _fill(self):
         """Hand out chunks until every worker holds `depth` or the items are
-        used up. Returns the slot whose worker refused a chunk, or None."""
+        used up. Returns `[slot]` for the slot whose worker refused a
+        chunk, or `[]`."""
         while True:
             open_slots = [s for s in self._live if self._accepting(s)
                           and len(s.inflight) < self._depth]
@@ -1115,28 +1118,31 @@ class _SlotPool:
             open_new = (len(self._live) < self._width
                         and (slot is None or slot.inflight))
             if slot is None and not open_new:
-                return None
+                return []
             chunk = self._next_chunk()
             if chunk is None:
-                return None
+                return []
             if open_new:
                 slot = self._open()
             if not self._submit(slot, chunk):
-                return slot
+                return [slot]
 
     # --- retiring ---------------------------------------------------------
 
     def _retire(self, slot):
         """Tell the slot's worker to leave, and watch it until it has."""
         process = self._process_of(slot)
+        # Watched before it leaves `_live`, so an interrupt between the two
+        # leaves the worker in at least one list an exit reads; never in
+        # neither. The unfinished exit reads both and ends each once.
+        if process is not None:
+            self._retiring.append((process, time.monotonic()))
         self._live.remove(slot)
         slot.shut = True
         # `wait=False`, always (rule 4). The worker gets the executor's exit
         # sentinel and leaves on its own, running its exit work (`atexit`,
         # coverage's data file).
         slot.executor.shutdown(wait=False)
-        if process is not None:
-            self._retiring.append((process, time.monotonic()))
 
     def _end_late_leavers(self, now, final=False):
         """Drop the workers told to leave that have left; SIGKILL those still
@@ -1187,23 +1193,25 @@ class _SlotPool:
 
     # --- deaths -----------------------------------------------------------
 
-    def _idle_death(self):
-        """A live worker holding no chunk whose process has ended, or None.
+    def _ended(self, slots):
+        """The slots of `slots` whose worker process has ended, read from
+        its sentinel.
 
-        Such a worker has no future to fail, so its sentinel is read. Any
-        death fails the stream, idle or not (owner ruling Q1 on #887).
+        A live worker holding no chunk has no future to fail, so this is how
+        its death is seen; any death fails the stream, idle or not (owner
+        ruling Q1 on #887).
         """
-        idle = [s for s in self._live if not s.inflight]
-        for slot in idle:
+        dead = []
+        for slot in slots:
             process = self._process_of(slot)
             if process is None:
                 continue
             try:
                 if not _still_running([process]):
-                    return slot
+                    dead.append(slot)
             except (OSError, ValueError):
-                return slot
-        return None
+                dead.append(slot)
+        return dead
 
     @staticmethod
     def _exit_code(process):
@@ -1225,9 +1233,11 @@ class _SlotPool:
             return None
         return code
 
-    def _broken(self, slot):
-        """The `BrokenProcessPool` for a death of `slot`'s worker, its
-        `lost` naming the chunks the worker held."""
+    def _broken(self, dead):
+        """The `BrokenProcessPool` for the deaths of the workers of `dead`
+        (a list of slots, every one seen in the same wake), its `lost`
+        naming the chunks they held. The message names the first."""
+        slot = dead[0]
         process = slot.process
         pid = process.pid if process is not None else None
         code = self._exit_code(process)
@@ -1252,11 +1262,12 @@ class _SlotPool:
                 f"this way. The work it held cannot finish, so the pool was "
                 f"stopped.")
         exc = BrokenProcessPool(message)
-        # For #668: `(first item index, chunk)` for each chunk the dead
-        # worker held, so they can be run again one at a time. Nothing
-        # reads it yet.
-        exc.lost = tuple(sorted(((start, chunk) for _, start, chunk
-                                 in slot.inflight.values()),
+        # For #668: `(first item index, chunk)` for each chunk a dead worker
+        # held, every worker that died in the same wake included (owner
+        # ruling Q-B on #1199), so they can be run again one at a time.
+        # Nothing reads it yet.
+        exc.lost = tuple(sorted(((start, chunk) for each in dead
+                                 for _, start, chunk in each.inflight.values()),
                                 key=lambda pair: pair[0]))
         return exc
 
@@ -1285,14 +1296,22 @@ class _SlotPool:
         self._func = func
         self._chunks = _numbered_chunks(items, chunksize)
         finished = False
+        # Seen by `_end_open_slot_pools` at interpreter exit while it runs.
+        # Held here, not read again in the `finally`: a generator finalized
+        # during module teardown would find the global already None.
+        open_pools = _OPEN_SLOT_POOLS
+        open_pools.add(self)
         try:
             yield from self._stream(ordered)
             finished = True
         finally:
-            if finished:
-                self._finished_exit()
-            else:
-                self._unfinished_exit()
+            try:
+                if finished:
+                    self._finished_exit()
+                else:
+                    self._unfinished_exit()
+            finally:
+                open_pools.discard(self)
 
     def _stream(self, ordered):
         held = {}        # ordered: sequence -> results, or a task's exception
@@ -1305,8 +1324,16 @@ class _SlotPool:
             else:
                 outcomes.append(outcome)
 
+        def ready():
+            nonlocal next_seq, outcomes
+            while next_seq in held:
+                outcomes.append(held.pop(next_seq))
+                next_seq += 1
+            taken, outcomes = outcomes, []
+            return taken
+
         dead = self._fill()
-        while dead is None:
+        while not dead:
             futures = [f for s in self._live for f in s.inflight]
             if not futures:
                 break
@@ -1314,29 +1341,37 @@ class _SlotPool:
                 futures, timeout=_POOL_WATCH_S,
                 return_when=concurrent.futures.FIRST_COMPLETED)
             dead = self._settle(done, sink)
-            if dead is None:
-                dead = self._idle_death()
-            if dead is None:
+            if not dead:
+                dead = self._ended([s for s in self._live if not s.inflight])
+            if not dead:
                 self._end_late_leavers(time.monotonic())
                 dead = self._fill()
-            if dead is not None:
-                # Every result another worker had already returned is
-                # delivered before the death is raised; on the ordered
-                # path only those before the first missing one, because
-                # `import_files` reads "delivered" as a prefix.
-                others = {f for s in self._live if s is not dead
-                          for f in s.inflight if f.done()}
-                self._settle(others, sink, deaths=False)
-            while next_seq in held:
-                outcomes.append(held.pop(next_seq))
-                next_seq += 1
-            ready, outcomes = outcomes, []
-            for outcome in ready:
+            if dead:
+                break
+            for outcome in ready():
                 if isinstance(outcome, BaseException):
                     raise outcome
                 yield from outcome
-        if dead is not None:
-            raise self._broken(dead)
+        if not dead:
+            return
+        # Every other worker found ended by now died in the same wake: its
+        # futures may not be failed yet (the executor's manager thread marks
+        # them), but the chunks it held are lost all the same (owner ruling
+        # Q-B on #1199).
+        dead += self._ended([s for s in self._live if s not in dead])
+        # Every result another worker had already returned is delivered
+        # before the death is raised, whichever way the death was seen (a
+        # future, an idle worker's sentinel, a refused submit); on the
+        # ordered path only those before the first missing one, because
+        # `import_files` reads "delivered" as a prefix.
+        others = {f for s in self._live if s not in dead
+                  for f in s.inflight if f.done()}
+        self._settle(others, sink, deaths=False)
+        for outcome in ready():
+            if isinstance(outcome, BaseException):
+                raise outcome
+            yield from outcome
+        raise self._broken(dead)
 
     def _settle(self, done, sink, deaths=True):
         """Take each finished future in `done` off its slot and hand its
@@ -1344,20 +1379,21 @@ class _SlotPool:
         Retires each slot that has run its quota and holds nothing.
 
         Returns:
-            The first slot whose worker died, or None. With `deaths=False`
-            a dead worker's future is left where it is.
+            Every slot whose worker died, in `_live` order; `[]` if none.
+            With `deaths=False` a dead worker's future is left where it is,
+            and `[]` is returned.
         """
-        dead = None
+        dead = []
         for slot in list(self._live):
             for future in [f for f in slot.inflight if f in done]:
                 exc = future.exception()
                 if isinstance(exc, BrokenProcessPool):
-                    if deaths and dead is None:
-                        dead = slot
+                    if deaths and slot not in dead:
+                        dead.append(slot)
                     continue
                 sequence, _, _ = slot.inflight.pop(future)
                 sink(sequence, exc if exc is not None else future.result())
-            if (slot is not dead and not slot.inflight
+            if (slot not in dead and not slot.inflight
                     and not self._accepting(slot)):
                 self._retire(slot)
         return dead
@@ -1384,7 +1420,11 @@ class _SlotPool:
             if slot.process is None:
                 processes += list((getattr(slot.executor, "_processes", None)
                                    or {}).values())
-        processes = [p for p in processes if p is not None]
+        unique = {}
+        for process in processes:
+            if process is not None:
+                unique.setdefault(id(process), process)
+        processes = list(unique.values())
         self._retiring = []
         started = time.monotonic()
         try:
@@ -1448,6 +1488,38 @@ def _numbered_chunks(items, chunksize):
         yield sequence, start, chunk
         sequence += 1
         start += len(chunk)
+
+
+#: Every `_SlotPool` whose stream is open, for `_end_open_slot_pools`.
+_OPEN_SLOT_POOLS = weakref.WeakSet()
+
+
+def _end_open_slot_pools():
+    """At interpreter exit, end every recycling pool whose stream is still
+    open, as its own unfinished exit would (owner ruling Q-A on #1199).
+
+    A stream left open at exit (Ctrl-C or an uncaught exception in the
+    caller's loop, whose traceback keeps the generator alive) never reaches
+    its `finally` before `concurrent.futures`' own exit hook joins every
+    executor's manager thread, which waits for every task in flight and,
+    with a worker that cannot leave, for good.
+    """
+    for pool in list(_OPEN_SLOT_POOLS):
+        try:
+            pool._unfinished_exit()  # pylint: disable=protected-access
+        except Exception:  # pylint: disable=broad-exception-caught
+            continue
+
+
+# Registered after `concurrent.futures.process` is imported (the
+# `BrokenProcessPool` import above), because `threading._shutdown` runs these
+# hooks last-registered first: this one must run before that module's
+# `_python_exit`, which joins the manager threads. `threading._register_atexit`
+# is private; it is the only hook that runs before those joins (`atexit` runs
+# after them), and it is the one `concurrent.futures` itself uses.
+# `test_the_recycling_pool_is_a_slot_pool.py` runs a real interpreter exit
+# with a stream left open on each interpreter the gate runs.
+threading._register_atexit(_end_open_slot_pools)  # pylint: disable=protected-access
 
 
 def _run_on_recycling_pool(func, items, strategy, ordered=False):
