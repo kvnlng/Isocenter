@@ -820,13 +820,14 @@ def one_bit_excess(out: Path):
     decodes that many, a count that is not a whole number of bytes each,
     and fails in CPython's words for a slice, so the row read
     `Decompression Failed: TypeError: slice indices must be integers ...`.
-    It is refused in a sentence naming the bytes held and needed.
+    #1062 refused it in a sentence naming the bytes held and needed; since
+    #1094 its two declared frames are kept, with a `DATA_LOSS` row.
 
     A fourth file, of a fourth patient: the same four bytes under a
     NumberOfFrames `(0028,0008)` that is present and holds no value.
     pydicom reads that as one frame, so the four bytes have room for
-    three, and it fails the same way. It is refused in the same sentence,
-    which says `NumberOfFrames is read as 1`.
+    three, and it fails the same way. Since #1094 its one frame is kept,
+    with a row saying `NumberOfFrames is empty (read as 1)`.
 
     No other input holds a native 1-bit frame."""
     write(ct("one_bit_excess", study=1, pid="GOLD-one_bit_excess-good"),

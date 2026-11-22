@@ -467,7 +467,8 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_an_icon_label_is_judged_against_its_samples.py",  # #1081
+    "isocenter/io_handlers.py": (["tests/test_a_one_bit_file_keeps_its_declared_frames.py",  # #1094: a 1-bit excess keeps the declared frames
+                                  "tests/test_an_icon_label_is_judged_against_its_samples.py",  # #1081
                                   "tests/test_a_dropped_table_naming_more_asks_the_basic_offset_table.py",  # #1067
                                   "tests/test_an_offset_table_without_lengths_is_refused_in_our_words.py",  # #1086
                                   "tests/test_a_codec_module_that_does_not_load_gets_the_install_advice.py",  # #1092
@@ -1092,7 +1093,8 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_write_str_if_changed_reads_the_code_string_spelling.py",  # #1084
+    "isocenter/entities.py": (["tests/test_a_one_bit_file_keeps_its_declared_frames.py",  # #1094: a 1-bit excess keeps the declared frames
+                               "tests/test_write_str_if_changed_reads_the_code_string_spelling.py",  # #1084
                                "tests/test_an_offset_table_without_lengths_is_refused_in_our_words.py",  # #1086
                                "tests/test_a_reason_says_each_fact_once.py",  # #1091: the read door
                                "tests/test_a_codec_module_that_does_not_load_gets_the_install_advice.py",  # #1092: arm 1
@@ -1363,7 +1365,8 @@ TARGETS = {
     # no test had; `test_the_signedness_gate_counts_frames_with_no_offset_table`
     # now pins it and kills both by a real edit. The decode-error print is
     # gone with `get_pixel_data`, and `is_available()`'s print is killed.
-    "isocenter/imagecodecs_handler.py": (["tests/test_a_dropped_table_naming_more_asks_the_basic_offset_table.py",  # #1067
+    "isocenter/imagecodecs_handler.py": (["tests/test_a_one_bit_file_keeps_its_declared_frames.py",  # #1094: a 1-bit excess keeps the declared frames
+                                          "tests/test_a_dropped_table_naming_more_asks_the_basic_offset_table.py",  # #1067
                                           "tests/test_an_offset_table_without_lengths_is_refused_in_our_words.py",  # #1086
                                           "tests/test_a_codec_module_that_does_not_load_gets_the_install_advice.py",  # #1092
                                           "tests/test_one_frame_is_one_frame.py",  # #1087

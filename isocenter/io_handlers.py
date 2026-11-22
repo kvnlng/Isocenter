@@ -3093,7 +3093,10 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     if (_planar_configuration_to_infer(ds) is not None
             or _planar_configuration_to_override(ds) is not None):
         ds.PlanarConfiguration = 0
-    refusal = refusal_before_decode(ds)
+    # A decode that drops the excess skips the 1-bit refusal (#1094):
+    # pydicom with `allow_excess_frames=False` reads the declared frames.
+    refusal = refusal_before_decode(
+        ds, keeps_every_frame=allow_excess_frames is not False)
     if refusal is not None:
         raise RuntimeError(refusal)
     # An Extended Offset Table with no Lengths to read it by, under a

@@ -68,7 +68,7 @@ import struct
 import sys
 from io import BytesIO
 from itertools import islice
-from typing import Optional, Tuple, Union
+from typing import NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 from pydicom.uid import UID
@@ -831,6 +831,19 @@ NATIVE_FRAMES = "Pixel Data's length"
 RLE_FRAGMENTS = "RLE fragments"
 
 
+class NativeBits(NamedTuple):
+    """The marker for a native 1-bit element counted in bits (#1094).
+
+    Where every other marker is a string, this one carries the two
+    numbers its row names and the count tuple has no slot for: the bytes
+    held and the bits in one frame. A module-level class, so a count
+    pickles across `ingest_worker`'s process boundary in `meta`.
+    """
+
+    held: int
+    frame_bits: int
+
+
 def _walked_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     """The frames pydicom's walk finds beyond NumberOfFrames, or None.
 
@@ -902,27 +915,53 @@ def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
         declared_raw: NumberOfFrames as the file states it.
 
     Returns:
-        Optional[FrameCount]: The count, named `NATIVE_FRAMES`, or None
-        when pydicom would not return an excess: no more whole frames
-        than declared; a frame length that is not a whole number of bytes
-        (a 1-bit frame such as 3x5, where pydicom's own excess arithmetic
-        raises `TypeError`); `YBR_FULL_422`, whose longer buffer pydicom
+        Optional[FrameCount]: The count, named `NATIVE_FRAMES`, or, for
+        a 1-bit frame that is not a whole number of bytes (3x3 is nine
+        bits), named by a `NativeBits` marker and counted in bits (#1094).
+        None when pydicom would not return an excess: no more whole
+        frames than declared; `YBR_FULL_422`, whose longer buffer pydicom
         reads as a wrong label rather than as frames; a NumberOfFrames
-        pydicom refuses (negative, or empty); or a dataset pydicom cannot
-        set up a runner for, which the decode that follows refuses.
+        pydicom refuses (negative, or `''` set in memory; one holding no
+        value in a file is read as 1, as pydicom reads it, for the bits
+        arm only); or a dataset pydicom cannot set up a runner for, which
+        the decode that follows refuses.
     """
-    if not (declared_raw is None or isinstance(declared_raw, int)
-            and declared_raw >= 0):
+    # The bits arm reads a NumberOfFrames holding no value as 1: from a
+    # file that is None, and pydicom reads it as one frame
+    # (`declared_frame_count`). `''` set in memory pydicom refuses, in
+    # its words. The byte arm still declines both; changing that would
+    # move rows this change is not about.
+    from_file_empty = (declared_raw == ""
+                       and ds.get("NumberOfFrames", "") is None)
+    if not (declared_raw is None or from_file_empty
+            or isinstance(declared_raw, int) and declared_raw >= 0):
         return None
     try:
         runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
         runner.set_source(ds)
         frame_length = runner.frame_length(unit="bytes")
-        if (not isinstance(frame_length, int) or frame_length <= 0
-                or runner.photometric_interpretation == "YBR_FULL_422"):
+        if runner.photometric_interpretation == "YBR_FULL_422":
             return None
         actual = len(ds.PixelData)
+        # At one bit per sample a frame's bits are its samples: pydicom's
+        # "pixels" unit is rows x columns x samples per pixel.
+        frame_bits = runner.frame_length(unit="pixels")
+        one_bit = runner.bits_allocated == 1
     except Exception:  # pylint: disable=broad-except
+        return None
+    if (one_bit and isinstance(frame_bits, int) and frame_bits > 0
+            and frame_bits % 8):
+        # pydicom's own rule in bits, as `bit_packed_excess_words`
+        # reads it: integer arithmetic where pydicom floor-divides by a
+        # float number of bytes, the same quotient with nothing to round.
+        need = -(-frame_bits * declared // 8)
+        room = actual * 8 // frame_bits
+        if actual > need + need % 2 and room > declared:
+            return (room, declared, declared_raw,
+                    NativeBits(held=actual, frame_bits=frame_bits))
+        return None
+    if (from_file_empty or not isinstance(frame_length, int)
+            or frame_length <= 0):
         return None
     expected = frame_length * declared
     whole = actual // frame_length
@@ -1056,14 +1095,15 @@ def bit_packed_excess_words(ds) -> Optional[str]:
     frames, and where that is more than NumberOfFrames it decodes that
     many -- a `float` count here -- and fails in CPython's words for a
     slice (`TypeError: slice indices must be integers ...`), which name
-    nothing in the file (#669). `_native_excess` declines the same shape,
-    so nothing reports it either. Never raises.
+    nothing in the file (#669). Never raises.
 
     That is pydicom's default call. With `allow_excess_frames=False`
-    pydicom reads the declared frames of such a file, and this refuses
-    it all the same: the refusal does not read the keyword. No door
-    passes it for these files, because `_native_excess` reports no
-    excess for them and only a reported excess sets it.
+    pydicom reads the declared frames of such a file, and since #1094
+    `_native_excess` counts that excess in bits, so ingest, an icon and
+    every door that drops an excess keep the declared frames with a
+    `DATA_LOSS` row, and `refusal_before_decode` does not ask this. What
+    is left for it is a decode that keeps every frame: a direct
+    `_decode_pixels(ds)`.
 
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
@@ -1145,7 +1185,7 @@ def bit_packed_excess_words(ds) -> Optional[str]:
             f"read as frames.")
 
 
-def refusal_before_decode(ds) -> Optional[str]:
+def refusal_before_decode(ds, *, keeps_every_frame=True) -> Optional[str]:
     """The refusal `io_handlers._decode_pixels` makes before any decoder is asked.
 
     One function, so the door that raises it and the reader that must
@@ -1155,6 +1195,10 @@ def refusal_before_decode(ds) -> Optional[str]:
 
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
+        keeps_every_frame (bool): False where the decode drops an excess
+            (`allow_excess_frames=False`). pydicom then reads a native
+            1-bit file's declared frames, so `bit_packed_excess_words`
+            is not asked (#1094); the other three are.
 
     Returns:
         Optional[str]: The first of `signed_codestream_refusal`,
@@ -1168,7 +1212,7 @@ def refusal_before_decode(ds) -> Optional[str]:
     # carry that shape (the writer derives PixelRepresentation and the
     # codestream's sign from one dtype), so the readback never trips it.
     return (signed_codestream_refusal(ds)
-            or bit_packed_excess_words(ds)
+            or (bit_packed_excess_words(ds) if keeps_every_frame else None)
             or ragged_offset_table_words(ds)
             or missing_lengths_words(ds))
 
@@ -1237,6 +1281,20 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
     #
     # "1 frame", never "1 frames" (#1087), for every subject.
     frames = f"{table_frames} frame{'' if table_frames == 1 else 's'}"
+    if isinstance(table_name, NativeBits):
+        # In bits, because a frame here is not a whole number of bytes,
+        # and with what the declared frames need, which is the number
+        # the bytes held are measured against (#1094). A NumberOfFrames
+        # holding no value is counted only from a file, where pydicom
+        # reads it as 1, so here it is "read as 1".
+        held, bits = table_name
+        need = -(-bits * declared // 8)
+        if declared_raw == "":
+            declared_words = f"NumberOfFrames is empty (read as {declared})"
+        return (f"Pixel Data holds {held} bytes, room for {frames} of "
+                f"{bits} {'bit' if bits == 1 else 'bits'}; {declared_words}, "
+                f"which {'needs' if declared == 1 else 'need'} {need} "
+                f"{'byte' if need == 1 else 'bytes'}")
     if table_name == RLE_FRAGMENTS:
         counted_words = f"{WALKED_FRAMES} hold {frames}, one per fragment"
     elif table_name == WALKED_FRAMES:
