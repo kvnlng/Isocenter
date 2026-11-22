@@ -105,6 +105,35 @@ def test_an_in_process_export_leaves_the_graph_exactly_as_it_found_it(
         "persist an edit the caller never made")
 
 
+def test_a_plugin_writer_leaves_the_graph_exactly_as_it_found_it(tmp_path):
+    """The same pin through a plugin's path (#783): the worker builds the
+    dataset from the live instance and hands it to `write()`, which may do
+    anything with it. Nothing reaches the graph."""
+    import json
+
+    from support.plugin_exporters import Recorder
+
+    inst = _pixel_instance()
+    attrs_before = dict(inst.attributes)
+    revision_before = inst._revision
+    items_before = len(inst.sequences["0040,a730"].items)
+
+    ctx = _ctx(inst, str(tmp_path / "unused.dcm"))
+    ctx.writer = Recorder
+    ctx.writer_options = {}
+    ctx.export_folder = str(tmp_path / "out")
+    ctx.folder_names = ("Subject_P1", "Study_1", "Series_1")
+    ctx.exported_patient_id = "P1"
+    outcome = _export_instance_worker(ctx)
+    assert outcome.ok, outcome.error
+    with open(outcome.output_path, encoding="utf-8") as handle:
+        assert json.load(handle)["item_uid"] == "1.2.3.4.500"
+
+    assert len(inst.sequences["0040,a730"].items) == items_before
+    assert inst.attributes == attrs_before
+    assert inst._revision == revision_before
+
+
 def test_repeated_exports_write_byte_identical_files(tmp_path):
     """The accumulation, pinned at the artefact: 1 -> 1 -> 1, not 1 -> 2 -> 3.
 

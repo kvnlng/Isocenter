@@ -13,7 +13,7 @@ session.generate_report("compliance_report.md")
 
 The report includes:
 
-1. **Executive Summary**: the grade (`PASS` / `REVIEW_REQUIRED`), how many patients and instances the session holds, the privacy profile and de-identification method, and the pre-export boundary note described below. An **Instances Written** row (`191 of 192 requested`) appears only when the last `export()` call in this session was a DICOM export that ran. The row describes that export alone. A WFDB export, or an export that raised, removes the row. A session that has not exported has no such row, and that includes a session on a reopened store.
+1. **Executive Summary**: the grade (`PASS` / `REVIEW_REQUIRED`), how many patients and instances the session holds, the privacy profile and de-identification method, and the pre-export boundary note described below. An **Instances Written** row (`191 of 192 requested`) appears only when the last `export()` call in this session was an export that ran and was asked for at least one instance, in any format. The row describes that export alone. For a WFDB export it counts records written against the waveform instances asked for, those the pre-export scan withheld included (since 1.1, #783); a waveform with no samples is asked for and not written. An export that raised before it wrote, or that was asked for nothing, removes the row. A session that has not exported has no such row, and that includes a session on a reopened store.
 2. **Processing Audit**: aggregated counts of actions taken (e.g., tags remediated, pixels redacted, export runs completed).
 3. **Data Loss & Unscanned Content**: 3.1 lists every element that was
    present in the source and is not in the exported data, named with its
