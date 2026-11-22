@@ -3487,6 +3487,17 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
         # what #671 accepted as route-dependent (#682).
         arr = decode_declared_frames(ds, frames, beyond)
     except Exception as exc:  # pylint: disable=broad-except
+        # The fallback walks the frames with pydicom's own generator, so
+        # a buffer that generator refuses fails both decodes in one
+        # sentence, which the row then said twice (#1089, the cohort's
+        # `fewer_fragments_than_frames-short`). Said once. Still chained
+        # from `exc`, which `entities._missing_decoder_words` walks.
+        if (type(exc) is type(pydicom_error)  # pylint: disable=unidiomatic-typecheck
+                and str(exc) == str(pydicom_error)):
+            kind = (ValueError if isinstance(pydicom_error, ValueError)
+                    else RuntimeError)
+            raise kind(f"{pydicom_error}; imagecodecs could not decode it "
+                       f"either, for the same reason") from exc
         raise refused(describe_exception(exc)) from exc
 
     # The handler sign-extends signed JPEG Lossless and JPEG-LS samples

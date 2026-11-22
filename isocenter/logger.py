@@ -2,6 +2,7 @@
 Logging configuration and helpers for the Isocenter application.
 """
 import logging
+import re
 import sys
 
 import os
@@ -95,8 +96,12 @@ def describe_exception(exc: BaseException) -> str:
     or cannot be rendered at all (its `__str__` raises), and the direct
     cause (`raise ... from`) in the same spelling:
     `RuntimeError: Pixel Loader failed ... (caused by OSError: EIO)`.
-    `__context__` (an exception raised while handling another, without
-    `from`) is not followed.
+    The cause is left out where the message already holds it: the
+    message contains the cause's own description, or begins with the
+    cause's message (#1089). `__context__` (an exception raised while
+    handling another, without `from`) is not followed. An object's
+    memory address (`<_io.BytesIO object at 0x...>`) is written without
+    it (`<_io.BytesIO object>`), in the message and in the cause (#1091).
 
     Every site that turns an exception into audit text, a summary reason
     or a report failure calls this. Never raises.
@@ -115,11 +120,46 @@ def describe_exception(exc: BaseException) -> str:
     # `RuntimeError(...) from e`, and without the cause a sidecar `OSError`
     # would reach `PhiReport.failures` named only as a `RuntimeError`. It
     # lives here because `logger` is a leaf every caller already imports.
-    text = _type_and_message(exc)
+    return _with_cause(exc, _type_and_message)
+
+
+def _with_cause(exc: BaseException, describe) -> str:
+    """`describe(exc)`, and ` (caused by <describe(cause)>)` unless already said.
+
+    The tail is left out when the message already holds the cause
+    (#1089): it contains the cause's own one-line description, or it
+    begins with the cause's message, which is not blank. A cause whose
+    message is blank (`StopIteration()`) is always named: a bare type
+    name can occur in a message by chance and says nothing either way.
+    Only `exc.__cause__` is read, and nothing is changed on either.
+
+    Args:
+        exc (BaseException): The exception to describe.
+        describe: `_type_and_message` or `_type_and_reason`.
+
+    Returns:
+        str: The one-line description.
+    """
+    # Two tests, because the one wrapper that quotes its cause in this
+    # library -- the imagecodecs fallback's `refused()` -- quotes it two
+    # ways: pydicom's message first, without its type, and the fallback's
+    # error after, with it (`describe_exception(exc)`). **Never a bare
+    # substring test of the cause's message**: a short one (`EIO`, a
+    # one-word `KeyError`) can occur by chance in a message that does not
+    # quote it, and the cause would then be lost. Both sides are read
+    # through `_message`, so an address removed from one is removed from
+    # the other.
+    text = describe(exc)
     cause = exc.__cause__
-    if cause is not None:
-        text += f" (caused by {_type_and_message(cause)})"
-    return text
+    if cause is None:
+        return text
+    said = describe(cause)
+    cause_message = _message(cause)
+    message = _message(exc)
+    if cause_message and cause_message.strip() and message is not None and (
+            said in message or message.startswith(cause_message)):
+        return text
+    return f"{text} (caused by {said})"
 
 
 def describe_exception_without_paths(exc: BaseException) -> str:
@@ -144,11 +184,7 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     Returns:
         str: The one-line description, with no `OSError` path in it.
     """
-    text = _type_and_reason(exc)
-    cause = exc.__cause__
-    if cause is not None:
-        text += f" (caused by {_type_and_reason(cause)})"
-    return text
+    return _with_cause(exc, _type_and_reason)
 
 
 def _type_and_reason(exc: BaseException) -> str:
@@ -162,15 +198,37 @@ def _type_and_reason(exc: BaseException) -> str:
     return name
 
 
-def _type_and_message(exc: BaseException) -> str:
-    name = type(exc).__name__
+#: A default `repr` of an object, `<_io.BytesIO object at 0x122f547c0>`
+#: (#1091). Only `object at 0x<hex>` inside `<...>`: a UID, a header
+#: value pydicom quotes in hex, or any other `0x` a file wrote is not
+#: this shape and is left as it is.
+_ADDRESS = re.compile(r"<([^<>]*?) object at 0x[0-9a-fA-F]+>")
+
+
+def _message(exc: BaseException):
+    """`str(exc)` with every object address removed, or None when it raises.
+
+    pydicom's Pillow plugin quotes the `BytesIO` it handed to Pillow, at
+    an address that differs on every run, so one file under one policy
+    wrote a different row each time (#1091). Every recorded reason goes
+    through here, by way of `describe_exception`.
+    """
     # `str()` runs the exception's own `__str__`, which can raise. This
     # is called while a failure is being recorded, and raising here would
-    # replace that failure with this one; the type is still a reason. A
-    # whitespace-only message is no more a reason than an empty one, so
-    # it gets the bare type too.
+    # replace that failure with this one.
     try:
         message = str(exc)
     except Exception:  # pylint: disable=broad-exception-caught
+        return None
+    return _ADDRESS.sub(r"<\1 object>", message)
+
+
+def _type_and_message(exc: BaseException) -> str:
+    name = type(exc).__name__
+    # The type is still a reason when the message cannot be rendered. A
+    # whitespace-only message is no more a reason than an empty one, so
+    # it gets the bare type too.
+    message = _message(exc)
+    if message is None:
         return name
     return f"{name}: {message}" if message.strip() else name

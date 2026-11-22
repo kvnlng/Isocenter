@@ -286,8 +286,9 @@ def test_the_wide_shape_is_refused_at_ingest_with_both_reasons(
     assert got["failures"][0][1] == (
         f"Decompression Failed: ValueError: {WIDE_WORDS}; imagecodecs "
         f"could not decode it either: it decoded to uint16, where "
-        f"BitsAllocated 8 and PixelRepresentation 0 declare uint8 "
-        f"(caused by ValueError: {WIDE_WORDS})")
+        f"BitsAllocated 8 and PixelRepresentation 0 declare uint8")
+    # pydicom's words lead the message, so no `(caused by ...)` tail says
+    # them a second time (#1089).
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +337,8 @@ def test_a_decoder_error_in_the_fallback_keeps_pydicoms_class(
 
     The `RuntimeError` half is the shape of the one golden-cohort file
     that holds such a row (`JPEG2000-embedded-sequence-delimiter.dcm`),
-    which must stay as it is, byte for byte.
+    which must stay as it is, byte for byte, but for the `(caused by
+    ...)` tail #1089 removed.
     """
     from isocenter.io_handlers import ingest_worker  # pylint: disable=import-outside-toplevel
     theirs = _imagecodecs_words(CORRUPT_J2K)
@@ -352,7 +354,9 @@ def test_a_decoder_error_in_the_fallback_keeps_pydicoms_class(
     assert type(caught.value).__name__ == first_class
     assert reason == (
         f"Decompression Failed: {first_class}: {error}; imagecodecs could "
-        f"not decode it either: {theirs} (caused by {theirs})")
+        f"not decode it either: {theirs}")
+    # The fallback's error is quoted in the message, so its `(caused by
+    # ...)` tail is not written (#1089).
 
 
 def test_a_refusal_never_takes_the_class_of_a_pydicom_subclass(monkeypatch):
@@ -406,8 +410,9 @@ def test_a_real_file_pydicom_refuses_with_a_value_error_keeps_the_class_in_its_r
 
     assert ingest_worker(write(tmp_path, ds))[-1] == (
         f"Decompression Failed: ValueError: {FEWER}; imagecodecs could not "
-        f"decode it either: ValueError: {FEWER} (caused by ValueError: "
-        f"{FEWER})")
+        f"decode it either, for the same reason")
+    # Once (#1089): the fallback walks with pydicom's generator and fails
+    # in pydicom's words, which the row once said three times.
 
 
 # ---------------------------------------------------------------------------
