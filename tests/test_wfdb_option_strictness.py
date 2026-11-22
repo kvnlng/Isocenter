@@ -143,11 +143,15 @@ def test_both_formats_refuse_the_same_typo(tmp_path):
         session.close()
 
 
-@pytest.mark.parametrize("dicom_only", ["use_compression", "check_burned_in",
+@pytest.mark.parametrize("dicom_only", ["use_compression",
                                         "check_reversibility", "show_progress",
-                                        "subset", "verify_readback"])
+                                        "verify_readback"])
 def test_every_dicom_only_option_is_refused_by_the_wfdb_path(tmp_path, dicom_only):
-    """The six names the CHANGELOG promises are refused, one per case.
+    """The `dicom`-only names are refused, one per case.
+
+    Six until #783, whose owner rulings Q10 and Q11 (2026-11-20) gave
+    `wfdb` `subset` and `check_burned_in`; the four left are still
+    refused.
 
     Two holes this closes, and they are the same hole seen from two
     sides.
@@ -223,8 +227,9 @@ def test_the_admitted_options_are_the_two_the_page_freezes():
     which is what a test written from the prose would do and which would
     pass on a docstring that had stopped describing the code.
     """
-    assert wfdb._WFDB_OPTIONS == frozenset({"patient_ids",
-                                            "include_annotation_text"}), (
+    assert wfdb._WFDB_OPTIONS == frozenset({
+        "patient_ids", "include_annotation_text", "subset",
+        "check_burned_in"}), (
         f"the wfdb exporter admits {sorted(wfdb._WFDB_OPTIONS)}; "
-        f"docs/api/stability.md freezes patient_ids and "
-        f"include_annotation_text")
+        f"docs/api/stability.md names patient_ids, subset, check_burned_in "
+        f"and include_annotation_text")

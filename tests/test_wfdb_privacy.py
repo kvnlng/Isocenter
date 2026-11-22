@@ -942,7 +942,10 @@ def test_an_empty_patient_ids_records_an_export_row_saying_nothing_was_written(
 
 
 def test_the_wfdb_export_options_are_the_two_the_page_freezes():
-    """The options `WfdbExporter.export` reads are exactly the frozen two.
+    """The options `WfdbExporter.export` reads are exactly the frozen ones.
+
+    Two until #783, whose owner rulings Q10 and Q11 (2026-11-20) added
+    `subset` and `check_burned_in`.
 
     Set equality, not membership: `docs/api/stability.md` says the wfdb
     options *are* `patient_ids` and `include_annotation_text`, so a third
@@ -1032,6 +1035,7 @@ def test_the_wfdb_export_options_are_the_two_the_page_freezes():
             if key is not None:
                 read.add(key)
 
-    assert read == {"patient_ids", "include_annotation_text"}, (
-        f"WfdbExporter.export reads {sorted(read)}; the page freezes "
-        f"patient_ids and include_annotation_text")
+    assert read == {"patient_ids", "include_annotation_text", "subset",
+                    "check_burned_in"}, (
+        f"WfdbExporter.export reads {sorted(read)}; the page names "
+        f"patient_ids, subset, check_burned_in and include_annotation_text")

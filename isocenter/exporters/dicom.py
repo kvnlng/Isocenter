@@ -3,7 +3,7 @@
 A thin registry adapter over `DicomSession._export_dicom`, which does all
 the work.
 """
-from . import Exporter, register
+from . import Exporter, _install_built_in
 
 
 class DicomFormatExporter(Exporter):
@@ -34,4 +34,4 @@ class DicomFormatExporter(Exporter):
         return session._export_dicom(folder, **options)
 
 
-register("dicom", DicomFormatExporter)
+_install_built_in("dicom", DicomFormatExporter)

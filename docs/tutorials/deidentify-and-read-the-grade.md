@@ -348,9 +348,9 @@ It does not remove that row.
 
 The export writes what the store holds. The store holds the
 de-identified graph because each DICOM export above saved the session
-before it wrote. (An exporter of your own does not save.
-[Write your own export format](write-an-exporter.md#5-save-before-you-close)
-shows the `save()` that it needs.) So every patient comes out as before:
+before it wrote. (Every format saves first, an exporter of your own too:
+see [Write your own export format](write-an-exporter.md#5-close).) So
+every patient comes out as before:
 
 ```python
 def identities(folder):
