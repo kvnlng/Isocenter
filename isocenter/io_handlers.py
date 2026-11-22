@@ -5526,7 +5526,8 @@ def ingest_worker(fp: str) -> Tuple:
                 # for `YBR_FULL_422`. AFTER the decode, unlike the
                 # PlanarConfiguration write above, which reads nothing
                 # from the array and must stay before it. Written only on
-                # difference, the same shape as `_write_str_if_changed`:
+                # difference (an exact comparison here; `_write_str_if_changed`
+                # compares by `_cs_spelling`, #1084):
                 # an RGB, monochrome or palette source has meta equal to
                 # its label and bumps no revision. Not derived from the
                 # array's shape -- a 3-sample array is equally RGB or

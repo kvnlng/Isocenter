@@ -20,6 +20,7 @@ import isocenter.imagecodecs_handler as h
 from .logger import describe_exception_without_paths, get_logger
 from .pixel_geometry import (
     SIDECAR_DTYPE_NAMES,
+    _cs_spelling,
     GeometryEvidence,
     PIXEL_DTYPE_ATTR,
     declared_int,
@@ -2604,7 +2605,7 @@ class Instance(DicomItem):
     def _write_str_if_changed(self, tag: str, value: str) -> bool:
         """Write a string descriptor only when it actually differs.
 
-        Compared stripped and case-insensitively. Call only while holding
+        Compared by `pixel_geometry._cs_spelling` (#1084). Call only while holding
         `PIXEL_STATE_LOCK`.
 
         Args:
@@ -2615,7 +2616,15 @@ class Instance(DicomItem):
             bool: True when it wrote.
         """
         raw = self.attributes.get(tag)
-        if raw is not None and str(raw).strip().upper() == str(value).strip().upper():
+        # The one Code String spelling (`pixel_geometry._cs_spelling`,
+        # #1084), never a second one: `str.upper()` folds `ß` to `SS`, so
+        # it read two labels the spelling tells apart as one. Text only.
+        # A `bytes` label held compares unequal on purpose: the callers
+        # write the decoder's label because the samples changed, and a
+        # relabel after a conversion is a new label, not a respelling of
+        # one written as held (owner ruling of 2026-10-11).
+        if (isinstance(raw, str) and isinstance(value, str)
+                and _cs_spelling(raw) == _cs_spelling(value)):
             return False
         # `DicomItem.set_attr`: see `_write_int_if_changed`.
         DicomItem.set_attr(self, tag, value)
