@@ -63,6 +63,7 @@ raises rather than return the frames (`_native_excess`).
 # decode entry point here that skips `_decode_pixels`: it would read files
 # ingest refuses, and a mismatch refusal inside the decoder would turn an
 # excess ingest means to drop into a rejected file.
+import copy
 import struct
 import sys
 from io import BytesIO
@@ -402,6 +403,106 @@ def ragged_offset_table_words(ds) -> Optional[str]:
             f"{'byte' if length == 1 else 'bytes'} long, "
             f"which is not a whole number of 8-byte offsets, so it names no "
             f"whole number of frames.")
+
+
+def _lengths_not_stated(ds) -> Optional[Tuple[bytes, str]]:
+    """``(table, "empty" | "absent")`` for a table whose Lengths pydicom fails on.
+
+    An encapsulated file whose Extended Offset Table holds bytes beside
+    an Extended Offset Table Lengths element that is absent, or holds no
+    value (a zero-length element read from a file is None). pydicom's
+    decoder takes the table whenever it is present and fails on such a
+    Lengths element in CPython's words (`TypeError: object of type
+    'NoneType' has no len()`, `AttributeError: ... no attribute
+    'ExtendedOffsetTableLengths'`). A Lengths element holding bytes of
+    any length is not this shape: pydicom walks by it, or drops the table
+    and reads on (`_drops_the_table`), and so does a `b""` set in memory.
+    None otherwise. Never raises.
+    """
+    try:
+        if not ds.file_meta.TransferSyntaxUID.is_encapsulated:
+            return None
+        if "ExtendedOffsetTable" not in ds:
+            return None
+        table = ds.get("ExtendedOffsetTable")
+        table = getattr(table, "value", table)
+        if not isinstance(table, (bytes, bytearray)) or not table:
+            return None
+        if "ExtendedOffsetTableLengths" not in ds:
+            return bytes(table), "absent"
+        lengths = ds.get("ExtendedOffsetTableLengths")
+        lengths = getattr(lengths, "value", lengths)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return (bytes(table), "empty") if lengths is None else None
+
+
+def missing_lengths_words(ds) -> Optional[str]:
+    """The refusal for an Extended Offset Table with no Lengths to read it by (#1086).
+
+    The file stays refused (owner ruling of 2026-11-22, Q14): pydicom
+    fails on it, and reading it without the table would put frames into
+    the export from a table the file says to read them by. Only the
+    words change, from CPython's to a sentence naming both elements
+    (`_lengths_not_stated`). Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Returns:
+        Optional[str]: One sentence of numbers and element names, for the
+        `RuntimeError` `io_handlers._decode_pixels` raises, or None: not
+        this shape, or a header pydicom refuses for another element,
+        which keeps pydicom's sentence naming that element
+        (`validate_without_the_table`). Where pydicom cannot be asked,
+        this sentence is said: withheld, the row would be CPython's.
+    """
+    shape = _lengths_not_stated(ds)
+    if shape is None:
+        return None
+    # Asked without the two table elements: pydicom's own validation fails
+    # on this very Lengths element, so asked of `ds` it would always
+    # answer "refused" and this sentence would never be said.
+    if (_header_verdict(ds, without_extended_offset_table=True)
+            == HEADER_REFUSED):
+        return None
+    table, lengths = shape
+    if len(table) % 8:
+        named = f"is {len(table)} bytes long"
+    else:
+        count = len(table) // 8
+        named = f"names {count} frame{'' if count == 1 else 's'}"
+    held = ("there is no Extended Offset Table Lengths (7FE0,0002)"
+            if lengths == "absent"
+            else "its Extended Offset Table Lengths (7FE0,0002) is empty")
+    return (f"Extended Offset Table (7FE0,0001) {named}, and {held}, so no "
+            f"frame's length is stated and the frames cannot be read by the "
+            f"table.")
+
+
+def validate_without_the_table(ds) -> None:
+    """Raise pydicom's own refusal of the header, asked without the table.
+
+    For a file of `_lengths_not_stated`'s shape whose header pydicom
+    refuses for another element: the decode would fail on the Lengths
+    element first, in CPython's words, so `io_handlers._decode_pixels`
+    asks pydicom's validation here, on a copy without the two table
+    elements, and lets its exception go, in its class and its words,
+    which name the element. Returns without raising where pydicom
+    accepts the copy, or for any other file.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Raises:
+        AttributeError: A required element is missing, in pydicom's words.
+        ValueError: An element's value is invalid, in pydicom's words.
+    """
+    if _lengths_not_stated(ds) is None:
+        return
+    runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
+    runner.set_source(_without_the_table(ds))
+    runner._validate_options()  # pylint: disable=protected-access
 
 
 def offset_table_frame_count(ds) -> Optional[FrameCount]:
@@ -808,6 +909,70 @@ def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     return None
 
 
+#: `_header_verdict`'s three answers. `UNASKED` means only that the
+#: question could not be put to pydicom: its runner, or the runner's
+#: `_validate_options`, is not there to ask.
+HEADER_ACCEPTED = "accepted"
+HEADER_REFUSED = "refused"
+HEADER_UNASKED = "unasked"
+
+
+def _without_the_table(ds):
+    """A shallow copy of `ds` without the two Extended Offset Table elements.
+
+    The copy has a dictionary of its own, so removing the two elements
+    from it leaves the caller's dataset as it was; every other element
+    object is shared, and nothing here writes to one. `copy.copy` alone
+    would share pydicom's element dictionary (`Dataset._dict`), and a
+    `Dataset(ds)` does too, so the dictionary is copied by hand, under
+    `setup.py`'s `pydicom<4.0` cap. The encoding attributes a raw element
+    is read by are carried on the copy.
+    """
+    clone = copy.copy(ds)
+    clone._dict = dict(ds._dict)  # pylint: disable=protected-access
+    for tag in (0x7FE00001, 0x7FE00002):
+        clone._dict.pop(tag, None)  # pylint: disable=protected-access
+    return clone
+
+
+def _header_verdict(ds, *, without_extended_offset_table=False) -> str:
+    """pydicom's own validation of the header, as one of three answers.
+
+    `HEADER_REFUSED` for any exception from `set_source` or
+    `_validate_options`, because the decode raises the same;
+    `HEADER_UNASKED` only where the question could not be put: the
+    runner class did not import, or has no `_validate_options`, which is
+    checked before the call, never inferred from an `AttributeError`
+    raised inside it; `HEADER_ACCEPTED` otherwise. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+        without_extended_offset_table (bool): Ask of a copy without the
+            two Extended Offset Table elements (`_without_the_table`).
+            pydicom itself fails on a table whose Lengths element is
+            empty or absent, so asked of the dataset as it stands the
+            answer for such a file is always "refused"; asked without
+            the table, it is about every other element.
+
+    Returns:
+        str: `HEADER_ACCEPTED`, `HEADER_REFUSED` or `HEADER_UNASKED`.
+    """
+    try:
+        from pydicom.pixels.decoders.base import DecodeRunner as runner_class  # pylint: disable=import-outside-toplevel
+    except Exception:  # pylint: disable=broad-except
+        return HEADER_UNASKED
+    if not callable(getattr(runner_class, "_validate_options", None)):
+        return HEADER_UNASKED
+    try:
+        source = _without_the_table(ds) if without_extended_offset_table else ds
+        runner = runner_class(ds.file_meta.TransferSyntaxUID)
+        runner.set_source(source)
+        runner._validate_options()  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        return HEADER_REFUSED
+    return HEADER_ACCEPTED
+
+
 def _pydicom_refuses_the_header(ds) -> bool:
     """Would pydicom's decoder refuse this dataset before it reads a byte?
 
@@ -853,14 +1018,11 @@ def _pydicom_refuses_the_header(ds) -> bool:
     # copy of pydicom's rules is a second answer to "what does pydicom
     # refuse" (the first build of #669 judged a label pydicom does not
     # take, and the second every header it does not).
-    try:
-        from pydicom.pixels.decoders.base import DecodeRunner  # pylint: disable=import-outside-toplevel
-        runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
-        runner.set_source(ds)
-        runner._validate_options()  # pylint: disable=protected-access
-    except Exception:  # pylint: disable=broad-except
-        return True
-    return False
+    #
+    # Unasked counts as refused here: the 1-bit and ragged sentences then
+    # lose only their wording to pydicom's. A refusal whose withholding
+    # would lose more than wording reads `_header_verdict` itself.
+    return _header_verdict(ds) != HEADER_ACCEPTED
 
 
 def bit_packed_excess_words(ds) -> Optional[str]:
@@ -967,15 +1129,15 @@ def refusal_before_decode(ds) -> Optional[str]:
     One function, so the door that raises it and the reader that must
     not mistake it for a missing decoder
     (`entities._missing_decoder_words`) ask the same question. Each of
-    the three is about what the file holds, and never raises.
+    the four is about what the file holds, and never raises.
 
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
 
     Returns:
         Optional[str]: The first of `signed_codestream_refusal`,
-        `bit_packed_excess_words` and `ragged_offset_table_words` that
-        answers, or None.
+        `bit_packed_excess_words`, `ragged_offset_table_words` and
+        `missing_lengths_words` that answers, or None.
     """
     # Signedness first, as it was when `_decode_pixels` asked the three
     # in turn: Pillow decodes a signed codestream under
@@ -985,7 +1147,8 @@ def refusal_before_decode(ds) -> Optional[str]:
     # codestream's sign from one dtype), so the readback never trips it.
     return (signed_codestream_refusal(ds)
             or bit_packed_excess_words(ds)
-            or ragged_offset_table_words(ds))
+            or ragged_offset_table_words(ds)
+            or missing_lengths_words(ds))
 
 
 def frame_count_mismatch(ds) -> Optional[str]:
@@ -1936,10 +2099,13 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
     # a codec function, and a module that cannot load (a missing shared
     # library) raises `DelayedImportError`, an `ImportError`, from that
     # call. It is the installation at fault, not the file, so it gets
-    # the installation's refusal (#1092). Read with `getattr`: a test may
-    # set `imagecodecs` to an object without it, and a class of None
-    # would make the `except` below a `TypeError`.
-    delayed = getattr(imagecodecs, "DelayedImportError", None) or ()
+    # the installation's refusal (#1092). Read with `getattr`, and used
+    # only when it is an exception class: a test may set `imagecodecs` to
+    # a mock, whose attribute is no class, and an `except` naming one
+    # raises `TypeError` in place of the codec's own error.
+    delayed = getattr(imagecodecs, "DelayedImportError", None)
+    if not (isinstance(delayed, type) and issubclass(delayed, BaseException)):
+        delayed = ()
     try:
         frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
                   for bitstream in islice(

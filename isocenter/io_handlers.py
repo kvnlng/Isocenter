@@ -140,7 +140,8 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
-                                  refusal_before_decode)
+                                  refusal_before_decode,
+                                  validate_without_the_table)
 from .parallel import (run_parallel, _resolve_strategy,
                        new_spawn_process_pool)
 from .validation import IODValidator
@@ -3060,6 +3061,12 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     refusal = refusal_before_decode(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
+    # An Extended Offset Table with no Lengths to read it by, under a
+    # header pydicom refuses for another element (#1086): pydicom's decode
+    # would fail on the Lengths element first, in CPython's words, so its
+    # own validation is asked without the table, and its refusal naming
+    # the element is raised in its class. A no-op for every other file.
+    validate_without_the_table(ds)
     # Each keyword is forwarded only when given. On pydicom 3.0.2
     # `as_array(ds, allow_excess_frames=None)` truncates exactly as `False`
     # does, so passing a None through would silently truncate every
