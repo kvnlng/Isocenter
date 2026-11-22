@@ -1089,6 +1089,41 @@ def _icon_label_warning(label, at) -> Optional[str]:
             f"held, and neither was changed. {_PHOTOMETRIC_ICON}")
 
 
+def _icon_label_samples_warning(label, samples, at) -> Optional[str]:
+    """The WARNING for an icon label its own sample count contradicts (#1081).
+
+    `RGB` over one sample per pixel, or `MONOCHROME2` over three: the
+    contradiction the top level corrects
+    (`pixel_geometry.resolve_photometric_interpretation`, the same
+    predicate, asked of the label alone). An icon is not corrected: by
+    the warn-and-write rule its label is written as declared, over the
+    samples it held, with this row.
+
+    Args:
+        label: The label the item holds, as written (after
+            `_full_sample_label`).
+        samples (int): The item's own SamplesPerPixel.
+        at (str): The item's path in `_item_path_words`' spelling.
+
+    Returns:
+        Optional[str]: The WARNING sentence, or None: no label at all
+        (the predicate's default for an absent label is no
+        contradiction), a label that is not one text value, or a label
+        that agrees with the sample count.
+    """
+    if not isinstance(label, str) or not label.strip():
+        return None
+    if resolve_photometric_interpretation(
+            {"0028,0004": label}, samples) is None:
+        return None
+    names = ("a one-sample image" if samples >= 3 else "a colour image")
+    return (f"PhotometricInterpretation {_cs_quoted(label)} on the icon at "
+            f"{at} names {names}, and the item declares {samples} "
+            f"{'sample' if samples == 1 else 'samples'} per pixel. The "
+            f"label was written as declared, over the samples the item "
+            f"held, and neither was changed. {_PHOTOMETRIC_ICON}")
+
+
 def _icon_label_arity_warning(label, at) -> str:
     """The WARNING for an icon declaring several labels.
 
@@ -8391,7 +8426,9 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
     only, by the top level's rule (`_full_sample_label`, #646). The
     Photometric Interpretation written is then judged against the
     uncompressed row
-    (`_icon_label_warning`, `_icon_label_arity_warning`): an inadmissible
+    (`_icon_label_warning`, `_icon_label_arity_warning`) and against the
+    item's own sample count (`_icon_label_samples_warning`, #1081): an inadmissible,
+    contradicted
     or multi-valued label is written as declared, with a WARNING on
     `warnings`. A removed item is not judged; it carries its own loss
     row. The icon is always written raw, whatever `ctx.compression` is.
@@ -8590,6 +8627,8 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             warnings.append(_icon_label_arity_warning(label, at))
         else:
             judged = _icon_label_warning(_written_photometric(label), at)
+            if judged is None:
+                judged = _icon_label_samples_warning(label, samples, at)
             if judged is not None:
                 warnings.append(judged)
 

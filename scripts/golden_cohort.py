@@ -956,6 +956,71 @@ def _encapsulated(member, study, label, frames, declared, syntax, has_bot):
     return ds
 
 
+def decode_refusal_words(out: Path):
+    """An ordinary CT and five JPEG 2000 Lossless files, each of its own
+    patient, each refused at ingest in a sentence of its own (#1086,
+    #1087, #1067, #1091).
+
+    `-zeros` is one fragment of 64 zero bytes. Pillow cannot identify it,
+    and pydicom's message quoted the `BytesIO` it handed Pillow with its
+    memory address, so the row was different on every run; it is now
+    written `<_io.BytesIO object>`, and the fallback's error is said once.
+    `-lengths-empty` and `-lengths-absent` hold two frames in two
+    fragments under NumberOfFrames 2 and an Extended Offset Table of two
+    offsets, beside an Extended Offset Table Lengths that is empty or
+    absent. pydicom failed on each in CPython's words (`TypeError: object
+    of type 'NoneType' has no len()`, `AttributeError: ... no attribute
+    'ExtendedOffsetTableLengths'`); each is refused in a sentence naming
+    both elements. `-one-offset` holds an Extended Offset Table of one
+    offset beside one length under NumberOfFrames 2, refused as
+    `Extended Offset Table names 1 frame`, no longer `1 frames`.
+    `-dropped-over-basic` holds one fragment under NumberOfFrames 2, a
+    Basic Offset Table naming 1, and an Extended Offset Table of three
+    offsets beside 4 bytes of Lengths, which pydicom drops. Its row said
+    `with no offset table` over a file holding two; it is counted by the
+    Basic Offset Table pydicom reads by. No other input holds any of
+    these shapes."""
+    member, j2k = "decode_refusal_words", "1.2.840.10008.1.2.4.90"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    write(_encapsulated(member, 2, "zeros", (bytes(64),), 1, j2k, False),
+          out / f"{member}-zeros.dcm")
+    for study, label in ((3, "lengths-empty"), (4, "lengths-absent")):
+        ds = _encapsulated(member, study, label, _J2K_FRAMES, 2, j2k, False)
+        ds.add_new(0x7FE00001, "OV", _true_offsets(_J2K_FRAMES))
+        if label == "lengths-empty":
+            ds.add_new(0x7FE00002, "OV", b"")
+        write(ds, out / f"{member}-{label}.dcm")
+    ds = _encapsulated(member, 5, "one-offset", _J2K_FRAMES, 2, j2k, False)
+    ds.add_new(0x7FE00001, "OV", _true_offsets(_J2K_FRAMES[:1]))
+    ds.add_new(0x7FE00002, "OV", struct.pack("<Q", len(_J2K_FRAMES[0])))
+    write(ds, out / f"{member}-one-offset.dcm")
+    ds = _encapsulated(member, 6, "dropped-over-basic", _J2K_FRAMES[:1], 2,
+                       j2k, True)
+    ds.add_new(0x7FE00001, "OV", struct.pack("<3Q", 0, 1, 2))
+    ds.add_new(0x7FE00002, "OV", b"\0" * 4)
+    write(ds, out / f"{member}-dropped-over-basic.dcm")
+
+
+def icon_label_samples(out: Path):
+    """A CT whose one-sample Icon Image Sequence item is labelled `RGB`
+    (#1081). The export wrote it as held with no row, under PASS; it is
+    still written as held, with one `WARNING` naming the item, the label
+    and the sample count, and the run grades `REVIEW_REQUIRED`. No other
+    input holds an icon whose label contradicts its sample count."""
+    member = "icon_label_samples"
+    ds = ct(member, pid=f"GOLD-{member}")
+    icon = Dataset()
+    icon.Rows = icon.Columns = 2
+    icon.SamplesPerPixel = 1
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.PhotometricInterpretation = "RGB"
+    icon.add_new(0x7FE00010, "OB", bytes([11, 22, 33, 44]))
+    ds.IconImageSequence = Sequence([icon])
+    write(ds, out / f"{member}.dcm")
+
+
 def fewer_fragments_than_frames(out: Path):
     """An ordinary CT and one JPEG 2000 Lossless file of another patient:
     two frames in two fragments under NumberOfFrames 3, an empty Basic
@@ -1324,7 +1389,8 @@ MEMBERS = {f.__name__: f for f in (
     no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary,
     no_planar_configuration, structured_report, private_creators,
     declared_planar_configuration, number_vr_on_a_text_tag,
-    text_or_number_vr_on_a_binary_or_numeric_tag)}
+    text_or_number_vr_on_a_binary_or_numeric_tag,
+    decode_refusal_words, icon_label_samples)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
