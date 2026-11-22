@@ -5,10 +5,11 @@ of its recycling pool can leave neither by its sentinel nor by SIGTERM
 Export always runs on `run_parallel(maxtasksperchild=25)`, whose
 `multiprocessing.Pool` exited through `terminate()`: SIGTERM to each worker,
 then a join with no timeout. A worker that outlived SIGTERM held `export()`
-for good after every file had been written. The exit now gives the workers
-`_BROKEN_POOL_GRACE_S` and SIGKILLs the rest, with one WARNING log line and
-no audit row: the export's data is complete, so its grade does not change
-(owner ruling Q3 on #860).
+for good after every file had been written. Since #885 the recycling pool
+is one-worker executors: each worker is told to leave when its work is done,
+and one still running `_BROKEN_POOL_GRACE_S` later is sent SIGKILL, with one
+WARNING log line and no audit row: the export's data is complete, so its
+grade does not change (owner ruling Q3 on #860, Q2 on #885).
 
 The worker is made unable to leave by the initializer every worker runs,
 `parallel.resolve_worker_initializer`, patched in the parent after ingest so
@@ -24,8 +25,8 @@ from isocenter.session import DicomSession
 
 from support.ct_small_files import write_ct
 from support.project_secret import FIXED_A, load_fixed_secret
-from test_parallel_contract import (_RecordedPool, _cannot_leave,
-                                    _exit_records, _gone, _run_bounded)
+from test_parallel_contract import (_cannot_leave, _gone,
+                                    _late_leaver_records, _run_bounded)
 
 
 def _files(folder):
@@ -67,12 +68,10 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
     """
     monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
     monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
-    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
-                        raising=False)
     started = []
-    monkeypatch.setattr(_RecordedPool, "started", started)
-    # The class `_run_on_recycling_pool` builds, by its module name (#887).
-    monkeypatch.setattr(parallel, "_RecyclingPool", _RecordedPool)
+    # Every worker the recycling pool spawns, through its hook (#885).
+    monkeypatch.setattr(parallel._SlotPool, "_started",
+                        lambda self, process: started.append(process))
     for index in range(3):
         write_ct(tmp_path / "in" / f"{index}.dcm", f"P860{index}",
                  f"860{index}")
@@ -103,16 +102,17 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
                     except (OSError, ValueError):
                         pass
         assert not outcome["hung"], (
-            "export() did not return: its recycling pool's exit joined a "
-            "worker that cannot leave (#860)")
+            "export() did not return: its recycling pool waited on a "
+            "worker that cannot leave (#860, #885)")
         assert "error" not in outcome, outcome
         summary = outcome["value"]
         assert summary.written == 3, summary.failures
         session.store_backend.flush_audit_queue()
         assert _rows(db, ("ERROR",)) == errors_before
-        records = _exit_records(caplog)
-        assert len(records) == 1, [r.getMessage() for r in caplog.records]
-        assert "sent SIGKILL" in records[0].getMessage()
+        records = _late_leaver_records(caplog)
+        assert records, [r.getMessage() for r in caplog.records]
+        for record in records:
+            assert "sent SIGKILL" in record.getMessage()
         # Its own pool's workers only: the session's ingest pool is alive.
         assert _gone(started), "a worker of the export's pool is still running"
 

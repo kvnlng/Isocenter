@@ -11,8 +11,9 @@
                 pass
         pool.terminate()
 
-which is both things the comment in `parallel._end_recycling_pool` forbids.
-It kills while the pool is RUN, and it calls `terminate()` on the caller's
+which is both things the comment in `parallel._end_recycling_pool` forbade
+(that exit, and the `multiprocessing.Pool` it ended, went in #885). It kills
+while the pool is RUN, and it calls `terminate()` on the caller's
 thread. `terminate()` begins in `Pool._help_stuff_finish` by acquiring the
 inqueue's read lock, which an idle worker holds while it waits in `get()`.
 A worker killed there leaves the lock held for good, `_terminate_pool` has
@@ -67,10 +68,8 @@ are called on.
   `terminate()` in its `finally`, or the two in a helper function called
   from the `finally`, are not seen. A text search would miss the second as
   well; the first is the same hazard and is not this shape.
-- **`terminate()` alone.** `test_the_pool_internals_the_recycling_exit_reads_are_there`
-  ends in `finally: pool.terminate()`, on the caller's thread and under RUN
-  when an assertion above it fails. It kills nothing, so no lock is left
-  held, and it is allowed.
+- **`terminate()` alone.** A `finally: pool.terminate()` kills nothing,
+  so no lock is left held, and it is allowed.
 - **Which signal.** The number handed to `os.kill` is not read.
 """
 import ast
@@ -126,14 +125,16 @@ def recorded():
                 pass
 '''
 
-# The ending #1010 put in its place.
+# The ending to use since #885: close the recycling pool's stream, and its
+# own unfinished exit ends every worker within its bound.
 THROUGH_THE_LIBRARY = '''
 def test_a_pool():
-    pool = make()
+    stream = parallel.run_parallel(identity, range(4), maxtasksperchild=25,
+                                   return_generator=True)
     try:
-        list(pool.imap_unordered(identity, range(4)))
+        next(stream)
     finally:
-        parallel._end_recycling_pool(pool, finished=False)
+        stream.close()
 '''
 
 _TRIES = (ast.Try,) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
@@ -194,10 +195,11 @@ def test_no_test_ends_a_pool_by_killing_then_terminating():
     in a walk that read the file the ending was found in, `conftest.py`
     and a file below the top level.
 
-    End a recycling pool with `parallel._end_recycling_pool(pool,
-    finished=False)`: it runs the stdlib's exit on a helper thread, kills by
-    sentinel only what is still running after the grace, and holds the
-    caller no longer than its two bounds.
+    End the recycling pool by closing its stream (`stream.close()`): its
+    unfinished exit SIGTERMs every worker, kills by sentinel only what is
+    still running after the grace, and shuts each one-worker executor down
+    after the kill (#885). A `multiprocessing.Pool` is ended by the library's
+    own exit, with nothing killed first.
 
     Killing mutations: the old ending restored in
     `test_the_pool_internals_the_recycling_watch_reads_are_there`; this
@@ -212,8 +214,9 @@ def test_no_test_ends_a_pool_by_killing_then_terminating():
         "a `finally` kills workers and then calls terminate() on the "
         "caller's thread; a worker killed while it waits for a task holds "
         "the pool's inqueue lock for good, and terminate() waits on it "
-        "(#1010). End the pool with parallel._end_recycling_pool(pool, "
-        "finished=False) instead. The `try` is at: " + ", ".join(offenders))
+        "(#1010). Close the recycling pool's stream instead, which ends "
+        "its workers within a bound (#885). The `try` is at: "
+        + ", ".join(offenders))
 
 
 def test_the_ending_that_hung_is_the_one_refused():
@@ -268,7 +271,7 @@ def test_the_walk_names_a_refused_ending_wherever_it_is_written(tmp_path):
 def test_the_walk_reads_the_file_the_ending_was_found_in():
     """The walk is not vacuous: it reaches the file #1010 was found in, a
     file below the top level and `tests/conftest.py`, and sees in the first
-    a `finally` that kills, one that terminates, and the library's exit.
+    a `finally` that kills and one that shuts an executor down.
 
     A walk that had lost that file (moved, renamed, or a pattern that no
     longer matches) would pass for good with nothing read.
@@ -281,5 +284,4 @@ def test_the_walk_reads_the_file_the_ending_was_found_in():
         "no file under tests/support was read")
     blocks = _finally_blocks(path.read_text(encoding="utf-8"), path.name)
     assert any("kill" in names for _, names in blocks), blocks
-    assert any("terminate" in names for _, names in blocks), blocks
-    assert any("_end_recycling_pool" in names for _, names in blocks), blocks
+    assert any("shutdown" in names for _, names in blocks), blocks

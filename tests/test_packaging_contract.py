@@ -652,7 +652,7 @@ def _string_literals_in_package():
     `f"{RESOURCES_DIR}/redaction_rules.json"` that is
     `"/redaction_rules.json"`, which is not the basename the caller
     checks for. Measured by review of #391: that rewrite of the
-    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 857 turns
+    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 855 turns
     `test_every_shipped_resource_is_named_by_the_package` red. That is
     the safe direction (a resource the walk cannot
     see reads as unnamed, never as named), and it is the same rule the
@@ -2273,16 +2273,18 @@ def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
 
 
 def test_the_recycling_pools_bounded_exit_sits_below_the_stall_watchdog():
-    """`_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S` is below `_STALL_S`
-    and the faulthandler window, and the exit reads both by name (#860).
+    """`_BROKEN_POOL_GRACE_S` is below `_STALL_S` and the faulthandler
+    window, and the recycling pool's exits and its retire check read it by
+    name (#860, #885).
 
-    The recycling pool's exit waits the grace for its workers, SIGKILLs the
-    rest, and waits the second constant more for the stdlib's exit before
-    it lets the caller go. Their sum is the longest a caller can be held,
-    so it must stay below the watchdog and the faulthandler window: a
-    bounded exit must never be reported as a stall, or dumped as a hang.
-    The after-kill wait is not zero: the stdlib's exit still has to join
-    the killed workers and its own threads.
+    The recycling pool's unfinished exit waits the grace for its workers
+    after SIGTERM and SIGKILLs the rest; its finished exit and its retire
+    check SIGKILL a worker still running the grace after it was told to
+    leave. The grace is the longest a caller can be held by one of them, so
+    it must stay below the watchdog and the faulthandler window: a bounded
+    exit must never be reported as a stall, or dumped as a hang. Since #885
+    no wait follows the kill: a one-worker executor whose worker is dead has
+    nothing left for its exit to join.
     """
     import inspect
     import textwrap
@@ -2294,40 +2296,40 @@ def test_the_recycling_pools_bounded_exit_sits_below_the_stall_watchdog():
     match = re.search(r"^_STALL_S = ([0-9.]+)$", source, re.MULTILINE)
     assert match, "tests/conftest.py no longer defines _STALL_S (#250)"
     stall_s = float(match.group(1))
-    after_kill = parallel._POOL_EXIT_AFTER_KILL_S
-    bound = parallel._BROKEN_POOL_GRACE_S + after_kill
+    bound = parallel._BROKEN_POOL_GRACE_S
 
-    assert after_kill > 0, (
-        "_POOL_EXIT_AFTER_KILL_S is not positive: the stdlib's exit would "
-        "be left behind on every kill, with its pipes (#860)")
-    assert bound < stall_s, (
+    assert 5 <= bound < stall_s, (
         f"the recycling pool's exit can hold its caller {bound:g}s, not "
-        f"below the stall watchdog's {stall_s:g}s (#860)")
+        f"between 5 s and the stall watchdog's {stall_s:g}s (#860)")
     assert bound < threshold, (
         f"the recycling pool's exit can hold its caller {bound:g}s, beyond "
         f"the faulthandler window ({threshold:g}s) (#860)")
 
-    helper = inspect.getsource(parallel._end_recycling_pool)
-    names = {node.id for node in ast.walk(ast.parse(textwrap.dedent(helper)))
-             if isinstance(node, ast.Name)}
-    for name in ("_BROKEN_POOL_GRACE_S", "_POOL_EXIT_AFTER_KILL_S"):
-        assert name in names, (
-            f"_end_recycling_pool no longer reads {name}; a re-inlined "
-            "literal is what this family exists to stop (#368)")
+    def names_in(function):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        return {node.id for node in ast.walk(tree)
+                if isinstance(node, ast.Name)}
+
+    for function in (parallel._SlotPool._unfinished_exit,
+                     parallel._SlotPool._end_late_leavers,
+                     parallel._SlotPool._kill_late):
+        assert "_BROKEN_POOL_GRACE_S" in names_in(function), (
+            f"{function.__qualname__} no longer reads _BROKEN_POOL_GRACE_S; "
+            "a re-inlined literal is what this family exists to stop (#368)")
+    assert "_POOL_WATCH_S" in names_in(parallel._SlotPool._stream), (
+        "the recycling pool's stream no longer reads _POOL_WATCH_S (#887)")
 
 
-def test_a_workers_exit_bound_waits_for_the_recycling_pools_own_exit():
-    """`_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S <= _WORKER_EXIT_GRACE_S
-    < _STALL_S`, below the faulthandler window, and each is read by name
-    (#888, #844).
+def test_a_workers_exit_bound_sits_below_the_stall_watchdog():
+    """`_WORKER_EXIT_GRACE_S < _STALL_S`, below the faulthandler window and
+    the worker's own dump, and read by name (#888, #844).
 
-    A worker of the recycling pool arms its own SIGALRM once it leaves its
-    task loop, however it left, the pool's own close and terminate
-    included. Below the pool's exit bound, the worker's alarm would race
-    the parent's kill, and #860's WARNING lines would say whichever won.
-    Below the stall watchdog and the faulthandler window, a bounded exit is
-    never reported as a stall or dumped as a hang. The watch's period is
-    read by name too: it is the latency of seeing a dead worker (#887).
+    Since #885 the bound serves #844 alone: under
+    `ISOCENTER_WORKER_FAULTHANDLER=1`, a worker arms it in an `atexit`
+    before it cancels its pending traceback dump. The recycling pool's
+    workers no longer arm it at their quota; the parent ends one that
+    cannot leave. Below the stall watchdog and the faulthandler window, a
+    bounded exit is never reported as a stall or dumped as a hang.
     """
     import inspect
     import textwrap
@@ -2340,12 +2342,7 @@ def test_a_workers_exit_bound_waits_for_the_recycling_pools_own_exit():
     assert match, "tests/conftest.py no longer defines _STALL_S (#250)"
     stall_s = float(match.group(1))
     exit_bound = parallel._WORKER_EXIT_GRACE_S
-    pool_exit = parallel._BROKEN_POOL_GRACE_S + parallel._POOL_EXIT_AFTER_KILL_S
 
-    assert pool_exit <= exit_bound, (
-        f"_WORKER_EXIT_GRACE_S={exit_bound:g}s is below the recycling pool's "
-        f"own exit bound ({pool_exit:g}s): a worker's alarm would race the "
-        "parent's kill (#888)")
     assert exit_bound < stall_s, (
         f"_WORKER_EXIT_GRACE_S={exit_bound:g}s is not below the stall "
         f"watchdog's {stall_s:g}s (#888)")
@@ -2355,21 +2352,12 @@ def test_a_workers_exit_bound_waits_for_the_recycling_pools_own_exit():
     assert exit_bound < parallel._WORKER_FAULTHANDLER_TIMEOUT_S, (
         "the exit bound outlasts the worker's own traceback dump (#844)")
 
-    def names_in(function):
-        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
-        return {node.id for node in ast.walk(tree)
-                if isinstance(node, ast.Name)}
-
-    assert "_WORKER_EXIT_GRACE_S" in names_in(
-        parallel._run_on_recycling_pool), (
-        "_run_on_recycling_pool no longer reads _WORKER_EXIT_GRACE_S; a "
-        "re-inlined literal is what this family exists to stop (#368)")
-    assert "_WORKER_EXIT_GRACE_S" in names_in(
-        parallel.resolve_worker_initializer), (
+    tree = ast.parse(textwrap.dedent(inspect.getsource(
+        parallel.resolve_worker_initializer)))
+    assert "_WORKER_EXIT_GRACE_S" in {node.id for node in ast.walk(tree)
+                                      if isinstance(node, ast.Name)}, (
         "resolve_worker_initializer no longer reads _WORKER_EXIT_GRACE_S "
         "(#844)")
-    assert "_POOL_WATCH_S" in names_in(parallel._watched), (
-        "_watched no longer reads _POOL_WATCH_S (#887)")
 
 
 # ---------------------------------------------------------------------------

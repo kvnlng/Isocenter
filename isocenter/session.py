@@ -15,8 +15,6 @@ import contextlib
 import dataclasses
 import threading
 import datetime
-import multiprocessing
-import concurrent.futures
 import functools
 import numbers
 import weakref
@@ -64,7 +62,7 @@ from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
                             _TokenOfALaterScheme, _TokenOfAnEarlierLayout)
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
-                       resolve_max_workers, resolve_worker_initializer,
+                       resolve_max_workers, new_spawn_process_pool,
                        progress_bar, _end_broken_pool_stragglers)
 from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label,
                             _scan_policy_for, _deid_method_value)
@@ -2101,8 +2099,8 @@ def _report_processes_lever_on_a_memory_store(db_path, strategy):
         f'redact() cannot run on a ":memory:" store with {lever} set. '
         f'A redaction worker writes its redacted frame back to the store, '
         f'and {_WHY_PROCESSES_CANNOT_REDACT_A_MEMORY_STORE}, so processes '
-        f'are never correct for this store. Only multiprocessing.Pool '
-        f'implements worker recycling, so this call would have run in '
+        f'are never correct for this store. Worker recycling replaces '
+        f'worker processes, so this call would have run in '
         f'processes and every task would have failed with "no such table: '
         f'instance_blobs". Unset {lever} for this session, or use a '
         f'file-backed store -- Session("session.db") -- where processes are '
@@ -2667,21 +2665,15 @@ class DicomSession:
         self._ingest_lock = threading.Lock()
         self._ingests_in_flight = 0
 
-        self._executor = concurrent.futures.ProcessPoolExecutor(
-            # Sized by the resolver `run_parallel` uses, so
-            # `ISOCENTER_MAX_WORKERS` narrows `ingest()` as it narrows
-            # every other parallel step; not `None`, which is the
-            # stdlib's one worker per CPU whatever the variable says.
-            # Each `ingest()` re-resolves this and rebuilds the pool when
-            # the width has changed, so the variable is honoured whenever
-            # it is set rather than only here.
-            max_workers=self._executor_width,
-            mp_context=multiprocessing.get_context("spawn"),
-            # The same env-gated worker setup as run_parallel's pools
-            # (GC off, child-side faulthandler watchdog); resolved by
-            # the one resolver so the session's own pool cannot drift
-            # from the per-call ones.
-            initializer=resolve_worker_initializer())
+        # Sized by the resolver `run_parallel` uses, so
+        # `ISOCENTER_MAX_WORKERS` narrows `ingest()` as it narrows every
+        # other parallel step; not `None`, which is the stdlib's one worker
+        # per CPU whatever the variable says. Each `ingest()` re-resolves
+        # this and rebuilds the pool when the width has changed, so the
+        # variable is honoured whenever it is set rather than only here.
+        # The spawn pin and the worker setup are the helper's (#667), so
+        # the session's own pool cannot drift from the per-call ones.
+        self._executor = new_spawn_process_pool(self._executor_width)
 
         if db_exists:
             print(f"Loaded session from {self.persistence_file}")
@@ -2924,13 +2916,10 @@ class DicomSession:
                 # Another caller has replaced the pool that broke already;
                 # the one here now is live.
                 return
-            # Re-init, with the same spawn pin as construction: an OOM
-            # recovery must not quietly downgrade the pool to fork,
-            # nor drop the worker setup construction resolved.
-            replacement = concurrent.futures.ProcessPoolExecutor(
-                max_workers=max_workers,
-                mp_context=multiprocessing.get_context("spawn"),
-                initializer=resolve_worker_initializer())
+            # Re-init through the one helper construction uses: an OOM
+            # recovery must not quietly downgrade the pool to fork, nor
+            # drop the worker setup construction resolved.
+            replacement = new_spawn_process_pool(max_workers)
             retired, self._executor = self._executor, replacement
             # The recorded width follows every swap. A restart
             # that narrowed the pool for an OOM recovery and left this at
@@ -3017,10 +3006,7 @@ class DicomSession:
                 if peers:
                     skipped = (requested, self._executor_width, peers)
                 else:
-                    replacement = concurrent.futures.ProcessPoolExecutor(
-                        max_workers=requested,
-                        mp_context=multiprocessing.get_context("spawn"),
-                        initializer=resolve_worker_initializer())
+                    replacement = new_spawn_process_pool(requested)
                     resized = (self._executor_width, requested)
                     retired, self._executor = self._executor, replacement
                     self._executor_width = requested
@@ -10115,9 +10101,10 @@ class DicomSession:
             Exception: Whatever `export_batch` raised, after logging it.
         """
         # Processes are a decision: workers are recycled so memory leaked by
-        # the imaging C libraries is reclaimed, and only `multiprocessing.Pool`
-        # recycles on 3.12 (`ProcessPoolExecutor`'s `max_tasks_per_child`
-        # deadlocks `map` at the first replacement there). Asking for
+        # the imaging C libraries is reclaimed, by replacing one-worker
+        # processes (`parallel._SlotPool`, #885; `ProcessPoolExecutor`'s own
+        # `max_tasks_per_child` deadlocks `map` at the first replacement on
+        # 3.12). Asking for
         # `maxtasksperchild` rules threads out in `_resolve_execution_choice`,
         # so this runs in processes even on a free-threaded build. The cost is
         # pickling each `ExportContext` across a pipe. `store_backend` is
