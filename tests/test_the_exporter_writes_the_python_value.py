@@ -647,15 +647,16 @@ def test_text_under_a_text_vr_is_written_as_it_was(tag, make, element):
 
 
 @pytest.mark.parametrize("tag, make, element, fragment", [
+    # X5 (#1000): under a standard VR the gate in front of the write
+    # names the type, where pydicom's sentence spoke before.
     pytest.param(IS_TAG, lambda: np.array([7]), None,
-                 "TypeError: only 0-dimensional arrays can be converted to "
-                 "Python scalars", id="IS-1-d"),
+                 "TypeError: a ndarray is not a value IS can hold",
+                 id="IS-1-d"),
     pytest.param(IS_TAG, lambda: np.datetime64("2020-01-02"), None,
-                 "TypeError: int() argument must be a string, a bytes-like "
-                 "object or a real number, not 'datetime.date'",
+                 "TypeError: a datetime64 is not a value IS can hold",
                  id="IS-datetime64"),
     pytest.param(IS_TAG, lambda: np.ma.masked, None,
-                 "MaskError: Cannot convert masked element to a Python int.",
+                 "TypeError: a MaskedConstant is not a value IS can hold",
                  id="IS-masked"),
     pytest.param(PRIVATE, lambda: np.array([7]), None,
                  "ValueError: no VR fits a ndarray value", id="private-1-d"),
@@ -775,6 +776,9 @@ def _typed(value):
     (lambda: [1, 2.5, "A", True, None, np.int64(7)], [1, 2.5, "A", True, None, 7]),
     (lambda: [1, 2.5, "A", True, None, Decimal("1.5")],
      [1, 2.5, "A", True, None, 1.5]),
+    # X5: a `bytearray` is the `bytes` it equals, alone and in a list.
+    (lambda: bytearray(b"AB"), b"AB"),
+    (lambda: [bytearray(b"A"), b"B", Decimal("1.5")], [b"A", b"B", 1.5]),
 ], ids=lambda value: None)
 def test_the_value_the_writer_is_handed(make, written):
     """`_export_value`, by type as well as by value."""
@@ -784,7 +788,7 @@ def test_the_value_the_writer_is_handed(make, written):
 #: What `_export_value` hands back as the object it was given: a source's
 #: values, bytes, and everything #926 says is not a number.
 _UNTOUCHED = [
-    7, 1.5, True, None, "CT", b"AB", bytearray(b"AB"), memoryview(b"AB"),
+    7, 1.5, True, None, "CT", b"AB", memoryview(b"AB"),
     DSfloat("1.50"), IS("7"), DSdecimal("1.50"), UID("1.2.3"),
     pydicom.tag.BaseTag(0x00100010), datetime.date(2020, 1, 2),
     pydicom.valuerep.PersonName("Doe^Jane"),
@@ -921,7 +925,11 @@ def _under_a_recorded_vr(value, vr):
     # tuple outright. It is asked about the list, so the recorded PN is
     # kept live as it is after a reopen.
     (lambda: ("A^B", "C^D"), lambda: ["A^B", "C^D"], ("PN", ["A^B", "C^D"]), []),
-    (lambda: ("A^B\\C^D",), lambda: ["A^B\\C^D"], ("PN", "A^B\\C^D"), []),
+    # X5 (#1014): a list member holding a backslash is several names, and
+    # the list was written as more names than it holds. #951's split is
+    # for a bare `str`; a one-member list follows the list rule and is
+    # lost under a PRIVATE row (below).
+    (lambda: ("A^B\\C^D",), lambda: ["A^B\\C^D"], None, []),
     # A number under a recorded PN is that gate's to refuse, before the
     # text gate is reached: written as text under LO with the re-VR
     # sentence, live and as its twin alike. Not #939's row: that is for a
@@ -933,6 +941,12 @@ def _under_a_recorded_vr(value, vr):
 def test_a_recorded_private_person_name_is_one_answer_live_and_as_its_twin(
         live, twin, written, revr):
     """Where #951's Person Name arm meets the tuple and the number."""
+    if written is None:
+        lost = [("PRIVATE", f"Tag {PRIVATE} not exported (data loss): "
+                            f"ValueError: no VR fits a list value")]
+        assert _under_a_recorded_vr(live(), "PN") == (None, lost, revr)
+        assert _under_a_recorded_vr(twin(), "PN") == (None, lost, revr)
+        return
     expected = (written[0], _typed(written[1]))
     assert _under_a_recorded_vr(live(), "PN") == (expected, [], revr)
     assert _under_a_recorded_vr(twin(), "PN") == (expected, [], revr)
@@ -955,10 +969,12 @@ def test_a_reopened_stores_multi_valued_ds_and_is_take_the_fast_path():
     of `DSfloat` or `IS`. Neither is ever converted, so both exact types
     are plain: without them each such list paid the type pass and both
     scans, about 6 ms per 65,536 members. Removing them changes no output,
-    which is why the set is read here as well as the result."""
-    assert {DSfloat, IS} <= io_handlers._PLAIN_TYPES
-    assert Decimal not in io_handlers._PLAIN_TYPES
-    assert DSdecimal not in io_handlers._PLAIN_TYPES
+    which is why the set is read here as well as the result. It lives in
+    `entities`, which `_python_value` reads too (#1004)."""
+    from isocenter import entities
+    assert {DSfloat, IS} <= entities._PLAIN_TYPES
+    assert Decimal not in entities._PLAIN_TYPES
+    assert DSdecimal not in entities._PLAIN_TYPES
     for big in ([DSfloat("1.50")] * 65536, [IS("7")] * 65536,
                 [DSfloat("1.50"), 2, IS("7"), "A", None]):
         assert _export_value(big) is big
@@ -1075,10 +1091,11 @@ class _Group(enum.IntEnum):
     pytest.param(lambda: (_Group.ACQUISITION, 0x1063), _ONE,
                  id="pair-with-an-IntEnum"),
     pytest.param(lambda: (True, 7), b"\x01\x00\x07\x00", id="pair-with-a-bool"),
-    # A pair of floats names no tag; it is the list it equals, which
-    # pydicom has always written as two group-0000 tags.
-    pytest.param(lambda: (1.0, 7), b"\x00\x00\x01\x00\x00\x00\x07\x00",
-                 id="pair-with-a-float"),
+    # A pair of floats names no tag. It was the list it equals, which
+    # pydicom wrote as two group-0000 tags with no row; since X5 (#1026)
+    # a float under AT is no tag and loses the element
+    # (`test_what_a_vr_cannot_hold_costs_its_element.py`), as do the
+    # pair of Decimals and the pair of numpy floats that were here.
     # Second delta review of #1009, N3: four more tuples that name no tag
     # and are the list they equal (#1026). Each was dropped under a row
     # before #938; each list wrote exactly this.
@@ -1086,10 +1103,6 @@ class _Group(enum.IntEnum):
     pytest.param(lambda: ("0018", "1063", "1064"),
                  b"\x00\x00\x18\x00\x00\x00\x63\x10\x00\x00\x64\x10",
                  id="3-tuple-of-hex-strings"),
-    pytest.param(lambda: (Decimal("24"), Decimal("4195")),
-                 b"\x00\x00\x18\x00\x00\x00\x63\x10", id="pair-of-Decimals"),
-    pytest.param(lambda: (np.float32(1.0), np.float32(7.0)),
-                 b"\x00\x00\x01\x00\x00\x00\x07\x00", id="pair-of-numpy-floats"),
 ])
 def test_under_at_a_two_tuple_is_one_tag(make, written):
     """`(0x0018, 0x1063)` is pydicom's ordinary spelling of one tag, and
@@ -1103,31 +1116,28 @@ def test_under_at_a_two_tuple_is_one_tag(make, written):
 
 @pytest.mark.parametrize("make", [lambda: (None, None), lambda: [None, None]],
                          ids=["tuple", "list"])
-def test_a_pair_of_none_under_at_fails_the_write_as_its_list_does(make):
-    """Second delta review of #1009, N3: the one tuple under `AT` whose
-    list is worse than what the tuple did. `(None, None)` was one element
-    dropped under a row; as the list it equals it passes `_merge` with no
-    row and pydicom's writer raises on it, which fails the file, as
-    `[None, None]` always did (#1026)."""
-    ds, losses = Dataset(), []
-    DicomExporter._merge(ds, {AT_TAG: make()}, losses)
-    assert losses == []
-    ds.file_meta = FileMetaDataset()
-    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-    with pytest.raises(TypeError):
-        pydicom.dcmwrite(io.BytesIO(), ds, enforce_file_format=False)
+def test_a_pair_of_none_under_at_loses_the_element_as_its_list_does(make):
+    """Second delta review of #1009, N3: `(None, None)` as the list it
+    equals passed `_merge` with no row and pydicom's writer raised on it,
+    which failed the file, as `[None, None]` always did. Since X5 (#1026)
+    `None` is no tag, and both shapes lose the one element under one row
+    while the file is written."""
+    raw, losses, _notes = _merged({AT_TAG: make()})
+    assert raw(AT_TAG) is None
+    assert losses == [("STANDARD", f"Tag {AT_TAG} not exported (data loss): "
+                                   f"TypeError: a NoneType is not a tag, and "
+                                   f"AT holds tags")]
 
 
-def test_a_two_tuple_of_basetags_under_at_is_dropped_as_it_was():
-    """A `BaseTag` is an `int`, so a tuple of exactly two is taken for one
-    tag and pydicom refuses it (`OverflowError`): one element dropped
-    under a row, before #938 and after it, while its list is two tags.
-    Unchanged, and noted on #1026."""
+def test_a_two_tuple_of_basetags_under_at_is_the_two_tags_its_list_is():
+    """A `BaseTag` is an `int`, so a tuple of exactly two was taken for
+    one tag and pydicom refused it (`OverflowError`): one element dropped
+    under a row, while its list was two tags. Since X5 (#1026) a pair is
+    one tag only when each half is at most 0xFFFF, as pydicom reads it,
+    so this pair is the list it equals: two tags, no row."""
     pair = (pydicom.tag.BaseTag(0x00181063), pydicom.tag.BaseTag(0x00181064))
     raw, losses, _notes = _merged({AT_TAG: pair})
-    assert raw(AT_TAG) is None
-    ((scope, detail),) = losses
-    assert scope == "STANDARD" and "OverflowError" in detail
+    assert raw(AT_TAG) == ("AT", _ONE + _OTHER) and losses == []
     raw, losses, _notes = _merged({AT_TAG: list(pair)})
     assert raw(AT_TAG) == ("AT", _ONE + _OTHER) and losses == []
 
@@ -1150,9 +1160,9 @@ def test_a_two_tuple_under_a_private_tag_recorded_as_at_is_as_it_was():
 ], ids=["around", "set_attr", "set_attr-numpy-pair", "set_attr-mixed-pair"])
 def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route, pair):
     """Through `export()`, live, by both doors. After a save and a reopen
-    the store holds `[24, 4195]` and the file carries two tags: the
-    store's own spelling of a tuple, measured in the PR for #938 and not
-    changed here (#1016)."""
+    the store held `[24, 4195]` and the file carried two tags (#1016);
+    since X5 the store saves the pair as the one tag it names
+    (`test_what_a_vr_cannot_hold_costs_its_element.py`)."""
     edit = (_around if route == "around" else _through_set_attr)(
         AT_TAG, pair)
     result = _run(tmp_path / "live", edit)
@@ -1161,21 +1171,22 @@ def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route, pair):
     assert result["rows"] == [] and result["grade"] == _PASS
 
 
-_DROPPED_PAIR = ("Tag 0028,0009 not exported (data loss): OverflowError: "
-                 "Unable to create an element tag from '{}': the group and "
-                 "element values are limited to a maximum of 2-bytes each")
+_OUT_OF_AT = ("Tag 0028,0009 not exported (data loss): ValueError: an "
+              "int outside AT's range, 0 to 4294967295")
 
 
 @pytest.mark.parametrize("pair, written, dropped", [
-    # Each was the list of its twins on `main` (#1173): two 4-byte tags
-    # `(0018,1063)` and `(0018,1064)`, with no row. As a tuple it is taken
-    # for one tag, which pydicom refuses, and the element is dropped under
-    # a STANDARD row, as the plain-int tuple already was (#1026).
-    pytest.param((np.uint32(0x00181063), np.uint32(0x00181064)), None,
-                 "(1577059, 1577060)", id="full-tags"),
-    # Dropped on `main` too, but under pydicom's `ValueError` for the `-1`
-    # alone; now the pair's `OverflowError`.
-    pytest.param((np.int64(-1), np.int64(70000)), None, "(-1, 70000)",
+    # Each was the list of its twins before #1173: two 4-byte tags
+    # `(0018,1063)` and `(0018,1064)`, with no row. #1173 kept it a tuple,
+    # taken for one tag, which pydicom refused (`OverflowError`). Since
+    # X5 (#1026) a pair is one tag only when each half is at most 0xFFFF,
+    # so this pair is the list it equals again: two tags, no row.
+    pytest.param((np.uint32(0x00181063), np.uint32(0x00181064)),
+                 _ONE + _OTHER, None, id="full-tags"),
+    # Dropped before #1173 under pydicom's `ValueError` for the `-1`, and
+    # after it under the pair's `OverflowError`. Since X5 the AT gate
+    # names the VR's range, never the value.
+    pytest.param((np.int64(-1), np.int64(70000)), None, "out-of-range",
                  id="out-of-range"),
     # Two group-0000 tags on `main`, now one, as pydicom reads the pair.
     pytest.param((np.bool_(True), 7), b"\x01\x00\x07\x00", None,
@@ -1202,14 +1213,12 @@ def test_every_numpy_pair_set_under_at_exports_as_its_tuple(
         assert _element(result, AT_TAG) is None
         ((action, scope, details),) = result["rows"]
         assert (action, scope) == ("DATA_LOSS", "STANDARD")
-        assert details.endswith(_DROPPED_PAIR.format(dropped)), details
+        assert details.endswith(_OUT_OF_AT), details
 
 
 @pytest.mark.parametrize("pair, text", [
     pytest.param((np.uint16(0x0018), np.uint16(0x1063)), b"24\\4195 ",
                  id="numpy-pair"),
-    pytest.param((np.uint32(0x00181063), np.uint32(0x00181064)),
-                 b"1577059\\1577060 ", id="full-tags"),
 ])
 def test_a_numpy_pair_set_under_a_private_tag_recorded_as_at_is_text(
         tmp_path, pair, text):
@@ -1230,6 +1239,24 @@ def test_a_numpy_pair_set_under_a_private_tag_recorded_as_at_is_text(
     assert (action, scope) == ("WARNING", None)
     assert details.startswith(
         "Private element (0011,1001) recorded AT, written LO. "), details
+
+
+def test_a_pair_of_full_tags_under_a_private_tag_recorded_as_at_is_two_tags(
+        tmp_path):
+    """X5 (#1026): a pair of full tags names no one tag, so it is the list
+    it equals, which fits the recorded `AT` and is written as the two
+    tags, with no row. Before, it was kept a tuple, which the gate in
+    front of a recorded VR refuses, and written as text under `LO` with
+    the re-VR row. The plain-int pair of halves is unchanged (above)."""
+    def source(given):
+        given[0x00111001] = pydicom.DataElement(0x00111001, "AT", 0x00181063)
+
+    pair = (np.uint32(0x00181063), np.uint32(0x00181064))
+    result = _run(tmp_path / "live", _through_set_attr(PRIVATE, pair),
+                  source=source)
+    assert result["written"] == 1, result["written"]
+    assert _element(result, PRIVATE) == ("AT", _ONE + _OTHER)
+    assert result["rows"] == []
 
 
 # -- An array of text under a text VR is text ---------------------------------
@@ -1456,7 +1483,7 @@ def test_a_files_own_us_ss_or_fd_under_a_text_tag_loses_that_element(
     for an LO tag from `set_attr(tag, 42)`: so the gate takes it, the one
     element is lost under #939's row and the file is written, where the
     whole file failed before the gate. pydicom's own `IS` and `DSfloat`
-    are the other half (#1017)."""
+    are the other half, written as the file's text since X5 (#1017)."""
     cells = (("0008,1090", "US", 42, "int", "LO"),
              ("0018,5100", "SS", -3, "int", "CS"),
              ("0008,0070", "FD", 4.5, "float", "LO"))
@@ -1802,7 +1829,7 @@ def test_a_study_date_that_names_no_date_is_stamped_as_its_text(tmp_path):
     assert rows == []
 
 
-# -- A numpy scalar under a binary VR fails the file, as its twin does --------
+# -- A numpy scalar under a binary VR loses the element, as its twin does -----
 
 _BINARY_TAGS = {"OB": "0042,0011", "OW": "0028,1201", "OF": "0064,0009",
                 "OD": "0070,150d", "OL": "0066,0040", "OV": "0072,0081"}
@@ -1822,29 +1849,40 @@ _NUMPY_SCALARS = {
 
 @pytest.mark.parametrize("vr", sorted(_BINARY_TAGS))
 @pytest.mark.parametrize("kind", sorted(_NUMPY_SCALARS))
-def test_a_numpy_scalar_under_a_binary_vr_fails_the_file_as_its_twin_does(
+def test_a_numpy_scalar_under_a_binary_vr_loses_the_element_as_its_twin_does(
         vr, kind):
-    """Owner ruling of 2026-10-09 on the review of #1009 (finding 4): fail
-    everywhere. Before the conversion a live numpy scalar under OB, OD,
-    OF, OL, OV or OW was written as the bytes of its own buffer
-    (`np.uint8(200)` as `c8 00`, under every one of the six), where its
-    Python twin and the reopened store failed the file. It is its twin
-    now, and the twin's answer is pydicom's at `dcmwrite`. What a number
-    under a binary VR should export as is #1018."""
+    """Owner ruling of 2026-10-09 on the review of #1009 (finding 4): one
+    answer, live and as its twin. Before the conversion a live numpy
+    scalar under OB, OD, OF, OL, OV or OW was written as the bytes of its
+    own buffer (`np.uint8(200)` as `c8 00`), where its Python twin failed
+    the file. The twin's answer was pydicom's at `dcmwrite` until X5
+    (#1018, the owner's tie-breaker of 2026-11-20): a number is not
+    bytes, and it loses its element under one row, the file written."""
     tag, make = _BINARY_TAGS[vr], _NUMPY_SCALARS[kind]
     twin = make().item()
     assert type(twin) in (int, float, bool)
-    with pytest.raises(TypeError, match="bytes-like object is required"):
-        _merged({tag: twin})
-    with pytest.raises(TypeError, match="bytes-like object is required"):
-        _merged({tag: make()})
+    lost = [("STANDARD", f"Tag {tag} not exported (data loss): TypeError: "
+                         f"a {type(twin).__name__} is not bytes, and {vr} "
+                         f"holds bytes")]
+    for value in (twin, make()):
+        raw, losses, notes = _merged({tag: value})
+        assert raw(tag) is None and losses == lost and notes == []
 
 
 @pytest.mark.parametrize("vr", sorted(_BINARY_TAGS))
-def test_bytes_and_a_1_d_array_under_a_binary_vr_are_written_as_they_were(vr):
-    """The control: what a binary VR does hold is not converted."""
+def test_bytes_under_a_binary_vr_are_written_and_an_array_is_not(vr):
+    """The control: what a binary VR does hold is not converted. A 1-d
+    array was written as its buffer, with no row; by owner ruling Q1 of
+    2026-11-22 it loses its element like every other numpy value that is
+    not a number, and the caller passes `.tobytes()`."""
     tag = _BINARY_TAGS[vr]
     raw, losses, notes = _merged({tag: b"ABCDEFGH"})
     assert raw(tag) == (vr, b"ABCDEFGH") and losses == [] and notes == []
-    raw, losses, notes = _merged({tag: np.array([7], dtype=np.int64)})
+    array = np.array([7], dtype=np.int64)
+    raw, losses, notes = _merged({tag: array})
+    assert raw(tag) is None
+    assert losses == [("STANDARD", f"Tag {tag} not exported (data loss): "
+                                   f"TypeError: a ndarray is not a value "
+                                   f"{vr} can hold")]
+    raw, losses, notes = _merged({tag: array.tobytes()})
     assert raw(tag) == (vr, b"\x07" + b"\x00" * 7) and losses == []
