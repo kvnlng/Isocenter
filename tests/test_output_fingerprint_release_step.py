@@ -219,6 +219,7 @@ COMMITTED = {
         "no_planar_configuration-rle.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
     "number_vr_on_a_date_or_time": ["number_vr_on_a_date_or_time-1.dcm"],
+    "number_vr_on_a_text_tag": ["number_vr_on_a_text_tag-1.dcm"],
     "offset_table_edges": ["offset_table_edges-agreeing-rle.dcm",
                            "offset_table_edges-agreeing.dcm",
                            "offset_table_edges-clause.dcm",
@@ -242,6 +243,8 @@ COMMITTED = {
     "sop_classes_in_the_file_meta": ["sop_classes_in_the_file_meta-1.dcm"],
     "source_says_unmodified": ["source_says_unmodified-1.dcm"],
     "structured_report": ["structured_report-1.dcm"],
+    "text_or_number_vr_on_a_binary_or_numeric_tag": [
+        "text_or_number_vr_on_a_binary_or_numeric_tag-1.dcm"],
     "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
                             "unstated_private_vr-implicit.dcm",
                             "unstated_private_vr-mismatch.dcm"],
