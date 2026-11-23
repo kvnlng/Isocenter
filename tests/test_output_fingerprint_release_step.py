@@ -247,14 +247,20 @@ COMMITTED = {
         "private_vr_unlike_the_dictionary-sl.dcm",
         "private_vr_unlike_the_dictionary-ss.dcm"],
     "redacted": ["redacted-1.dcm"],
+    "signed_bad_header": ["signed_bad_header-bits-stored-17.dcm",
+                          "signed_bad_header-good.dcm"],
     "sop_classes_in_the_file_meta": ["sop_classes_in_the_file_meta-1.dcm"],
     "source_says_unmodified": ["source_says_unmodified-1.dcm"],
     "structured_report": ["structured_report-1.dcm"],
     "text_or_number_vr_on_a_binary_or_numeric_tag": [
         "text_or_number_vr_on_a_binary_or_numeric_tag-1.dcm"],
+    "trailing_bytes": ["trailing_bytes.dcm"],
     "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
                             "unstated_private_vr-implicit.dcm",
                             "unstated_private_vr-mismatch.dcm"],
+    "whole_codestreams": ["whole_codestreams-good.dcm",
+                          "whole_codestreams-no-frames.dcm",
+                          "whole_codestreams-one-frame.dcm"],
     "withheld": ["withheld-1.dcm"],
 }
 

@@ -1022,6 +1022,66 @@ def icon_label_samples(out: Path):
     write(ds, out / f"{member}.dcm")
 
 
+def whole_codestreams(out: Path):
+    """An ordinary CT and two JPEG 2000 Lossless files of two other
+    patients, each the two `_J2K_FRAMES` codestreams in two fragments with
+    an empty Basic Offset Table, one under NumberOfFrames 1 and one with
+    NumberOfFrames absent (#1088). pydicom joined the fragments and read
+    the first codestream, so the second image was lost with no row and the
+    grade was PASS. Each fragment is now counted as a frame: frame 0 is
+    kept, with one `DATA_LOSS` row (`Pixel Data's fragments hold 2 frames,
+    one whole JPEG 2000 codestream per fragment`). No other input holds
+    whole codestreams under one declared frame."""
+    member, j2k = "whole_codestreams", "1.2.840.10008.1.2.4.90"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    for study, label in ((2, "one-frame"), (3, "no-frames")):
+        ds = _encapsulated(member, study, label, _J2K_FRAMES, 1, j2k, False)
+        if label == "no-frames":
+            del ds.NumberOfFrames
+        write(ds, out / f"{member}-{label}.dcm")
+
+
+def trailing_bytes(out: Path):
+    """A 4x4 8-bit native CT whose Pixel Data holds 22 bytes, where its one
+    frame needs 16 (#1090). The six bytes beyond the frame are no frame and
+    are not in the exported file; that was silent. Ingest now writes one
+    STANDARD `DATA_LOSS` row naming both counts, which does not cost PASS.
+    pydicom's `MR_small_padded.dcm` is the other input of this shape."""
+    member = "trailing_bytes"
+    ds = ct(member, pid=f"GOLD-{member}", rows=4, cols=4)
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+    ds.PixelData = bytes((13 * i) % 256 for i in range(22))
+    write(ds, out / f"{member}.dcm")
+
+
+#: One 4x4 JPEG 2000 Lossless codestream whose SIZ declares signed 16-bit
+#: samples (`ssiz` 0x8f): `i * -37` for i in 0..15. A literal, for the
+#: reason `_J2K_FRAMES` gives.
+_SIGNED_J2K = bytes.fromhex(
+    "ff4fff5100290000000000040000000400000000000000000000000400000004"
+    "000000000000000000018f0101ff52000c00000001000004040001ff5c000440"
+    "80ff640025000143726561746564206279204f70656e4a504547207665727369"
+    "6f6e20322e352e34ff90000a0000000000270001ff93c07ec2a01f94a517f998"
+    "530cae0311fb69a0ce03263934275cffd9")
+
+
+def signed_bad_header(out: Path):
+    """An ordinary CT and one JPEG 2000 Lossless file of another patient:
+    a signed codestream (`_SIGNED_J2K`) under PixelRepresentation 0 and a
+    Bits Stored of 17 beside Bits Allocated 16 (#1085). It was refused in
+    the signed-codestream sentence, which never named the bad element; it
+    is refused in pydicom's sentence about Bits Stored. A signed file with
+    a header pydicom accepts keeps the signed sentence."""
+    member = "signed_bad_header"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    ds = _encapsulated(member, 2, "bits-stored-17", (_SIGNED_J2K,), 1,
+                       "1.2.840.10008.1.2.4.90", False)
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 16, 17, 15
+    write(ds, out / f"{member}-bits-stored-17.dcm")
+
+
 def fewer_fragments_than_frames(out: Path):
     """An ordinary CT and one JPEG 2000 Lossless file of another patient:
     two frames in two fragments under NumberOfFrames 3, an empty Basic
@@ -1391,7 +1451,8 @@ MEMBERS = {f.__name__: f for f in (
     no_planar_configuration, structured_report, private_creators,
     declared_planar_configuration, number_vr_on_a_text_tag,
     text_or_number_vr_on_a_binary_or_numeric_tag,
-    decode_refusal_words, icon_label_samples)}
+    decode_refusal_words, icon_label_samples,
+    whole_codestreams, trailing_bytes, signed_bad_header)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
