@@ -844,6 +844,24 @@ def test_python_value_hands_a_plain_list_back_without_a_scan():
     assert type(entities._python_value(pair)) is tuple
 
 
+def test_the_gate_asks_a_plain_list_its_types_once(monkeypatch):
+    """A 65,536-entry LUT under US costs the gate one pass over its types
+    and one `struct.pack`, not a numpy test per member (the per-member
+    walk cost about 7 ms there, measured for X5). Equivalent by output:
+    no member of a plain list is a numpy value, so the walk never
+    raises for one. Pinned by making the per-member test fail loudly;
+    a list holding one numpy member still takes it and is refused."""
+    def _asked(atom):
+        raise AssertionError("the per-member numpy test ran")
+
+    monkeypatch.setattr(io_handlers, "_is_a_numpy_leftover", _asked)
+    io_handlers._refuse_what_the_vr_cannot_hold("US", list(range(65536)))
+    monkeypatch.undo()
+    with pytest.raises(TypeError, match="is not a value US can hold"):
+        io_handlers._refuse_what_the_vr_cannot_hold(
+            "US", [1, np.timedelta64(5)])
+
+
 # -- T14: a plugin gets no element its VR cannot hold --------------------------
 
 def test_a_plugin_gets_no_element_its_vr_cannot_hold(tmp_path, monkeypatch):
