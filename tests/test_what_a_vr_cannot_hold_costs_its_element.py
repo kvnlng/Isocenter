@@ -800,6 +800,37 @@ def test_a_private_tag_recorded_at_keeps_its_pair_as_a_list(tmp_path):
         "AT", b"\x00\x00\x18\x00\x00\x00\x63\x10")
 
 
+@pytest.mark.parametrize("pair, text", [
+    pytest.param((0x18, 0x1063), b"24\\4195 ", id="one-tag"),
+    pytest.param((BaseTag(0x00181063), BaseTag(0x00181064)),
+                 b"(0018,1063)\\(0018,1064) ", id="full-tags"),
+    pytest.param((0x18, 0x10000), b"24\\65536", id="half-overflow"),
+])
+def test_a_live_pair_under_a_private_tag_recorded_at_is_text_as_before(
+        pair, text):
+    """Owner ruling Q5b and brief section 8 item 5: a 2-tuple under a
+    private tag recorded AT is unchanged by X5 (#1201 holds it). Every
+    2-tuple of integers stays the tuple there, whatever its halves, and
+    the recorded-VR gate writes it as LO text under the re-VR row, as at
+    ea3fb12c. The standard arm's 16-bit bound (#1026) does not reach it:
+    with the bound, the last two were written as AT with no re-VR row
+    (X5 review)."""
+    ds, losses, revrs = Dataset(), [], []
+    ds.add_new(0x00090010, "LO", "CREATOR")
+    DicomExporter._merge(ds, {"0009,1010": pair}, losses,
+                         {"0009,1010": "AT"}, revrs=revrs, corrections=[],
+                         warnings=[])
+    assert losses == []
+    assert (ds[0x00091010].VR, [(r.recorded, r.written) for r in revrs]) == (
+        "LO", [("AT", "LO")])
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    out = io.BytesIO()
+    pydicom.dcmwrite(out, ds, enforce_file_format=False)
+    out.seek(0)
+    assert pydicom.dcmread(out, force=True).get_item(0x00091010).value == text
+
+
 # -- T12: the US-or-SS arm re-raises a TypeError; the deciders do not ----------
 
 def test_the_us_or_ss_arm_re_raises_a_typeerror(monkeypatch):
