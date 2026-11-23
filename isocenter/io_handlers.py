@@ -4726,6 +4726,20 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                                            yield_exceptions=True,
                                            strategy=round_strategy,
                                            task_timeout=bound):
+                    if isinstance(result, _TaskDidNotFinish):
+                        # Only the slot pool makes this: a direct
+                        # `import_files(executor=None)` under
+                        # `ISOCENTER_MAX_TASKS_PER_CHILD`. That pool has
+                        # already run the file once more, alone, as the
+                        # first task of a fresh worker, and stopped it a
+                        # second time (Q8): the file's rejection, in its
+                        # place. Read as the pool's own failure, it raised
+                        # out of the import and lost every file.
+                        delivered += 1
+                        yield _failed_result(
+                            result.item,
+                            _RAN_PAST_THE_BOUND.format(bound=bound))
+                        continue
                     if isinstance(result, Exception):
                         failure = result
                         break
