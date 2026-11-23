@@ -51,7 +51,8 @@ of exactly two `str`, as one tag, as pydicom reads it (#1009). The pair
 must still be a `tuple` when the export reads it. After `set_attr()`, a
 `tuple` that holds a numpy number is still a `tuple` (above), so a pair
 of numpy integers set that way is one tag. Each half must be from 0 to
-0xFFFF. A pair of full tags is two tags. A `list` of two integers is
+0xFFFF. A pair of full tags, or a pair with a half past 0xFFFF, is two
+tags, as the `list` it equals is. A `list` of two integers is
 two tags. A store that was saved and opened again holds every other
 `tuple` as a `list`
 ([#1003](https://github.com/kvnlng/Isocenter/issues/1003)). The pair
@@ -71,7 +72,9 @@ type and the VR. Pass the text instead. This includes a subclass of
 `int` or `float`, such as an `IntEnum`. A list member that holds a
 backslash (`["A\\B", "C"]`) is several values, and is not written
 either. A value that a source file wrote under IS or DS for a text
-element is written as the file's own text.
+element is written as the file's own text, and so is pydicom's IS or
+DS value made from a `str` in code (`IS("7")`), which holds that text
+too. One made from a number (`IS(7)`) is not written.
 
 The same holds for the other standard VRs. Each value below is not
 written, and the file is exported without that element under one
