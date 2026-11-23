@@ -1195,6 +1195,27 @@ def pixels_elsewhere(out: Path):
     write(ds, out / f"{member}-url.dcm")
 
 
+def ybr_ict_source(out: Path):
+    """A 4x5 three-sample Secondary Capture labelled `YBR_ICT` over native
+    8-bit samples, Planar Configuration 0 (#1080). The JPEG 2000 export
+    encodes such a frame with the reversible colour transform, which
+    PS3.5 8.2.4 names `YBR_RCT`, and wrote it labelled `YBR_ICT`, the
+    irreversible transform's name, with no row under PASS. It is written
+    `YBR_RCT`, with an INFO note. Uncompressed, the label keeps its
+    `WARNING`. No other input is held under `YBR_ICT` after ingest:
+    pydicom-data's `US1_J2KI.dcm` is relabelled `RGB` by its decode."""
+    member = "ybr_ict_source"
+    ds = ct(member, rows=4, cols=5, pid=f"GOLD-{member}")
+    ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID = \
+        "1.2.840.10008.5.1.4.1.1.7"
+    ds.Modality = "OT"
+    ds.SamplesPerPixel, ds.PlanarConfiguration = 3, 0
+    ds.PhotometricInterpretation = "YBR_ICT"
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+    ds.PixelData = bytes((29 * i + 7) % 256 for i in range(4 * 5 * 3))
+    write(ds, out / f"{member}.dcm")
+
+
 def private_vr_unlike_the_dictionary(out: Path):
     """A private element whose stated VR is not the one pydicom's private
     dictionary lists (#1107). GE `GEMS_PETD_01` `(0009,109D)` is stored
@@ -1494,7 +1515,7 @@ MEMBERS = {f.__name__: f for f in (
     text_or_number_vr_on_a_binary_or_numeric_tag,
     decode_refusal_words, icon_label_samples,
     whole_codestreams, trailing_bytes, signed_bad_header,
-    icon_without_pixels, pixels_elsewhere)}
+    icon_without_pixels, pixels_elsewhere, ybr_ict_source)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
