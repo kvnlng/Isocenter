@@ -325,19 +325,22 @@ def test_an_ordered_run_keeps_the_order_with_the_report_in_its_place(
     assert _gone(recorded_pools)
 
 
+@pytest.mark.parametrize("ordered", [False, True])
 def test_a_chunk_of_several_items_is_confirmed_one_item_at_a_time(
-        recorded_pools):
+        recorded_pools, ordered):
     """Chunks of 3 items: the chunk holding the item that never returns is
     run past the bound, then each of its items alone. Only that item is
-    reported; the two beside it come back.
+    reported; the two beside it come back. Ordered, the three come back
+    as their chunk, in its place, with the report between its neighbours.
 
-    Killing mutation: the whole chunk confirmed as one task, which reports
-    its two good items too.
+    Killing mutations: the whole chunk confirmed as one task, which reports
+    its two good items too; each item run alone handed over as the whole
+    chunk, which in order keeps only the last one in.
     """
     items = [(value, 4) for value in range(9)]
     outcome = _run_bounded(lambda: parallel.run_parallel(
         _wedge_at, items, max_workers=2, maxtasksperchild=25, chunksize=3,
-        show_progress=False, yield_exceptions=True,
+        show_progress=False, yield_exceptions=True, ordered=ordered,
         task_timeout=BOUND), 150)
 
     assert not outcome["hung"]
@@ -345,6 +348,10 @@ def test_a_chunk_of_several_items_is_confirmed_one_item_at_a_time(
     good = sorted(v for v in values if not isinstance(v, BaseException))
     assert good == [0, 1, 2, 3, 5, 6, 7, 8], values
     assert [v.item for v in values if isinstance(v, BaseException)] == [(4, 4)]
+    if ordered:
+        assert values[:4] == [0, 1, 2, 3] and values[5:] == [5, 6, 7, 8], \
+            values
+        assert isinstance(values[4], parallel._TaskDidNotFinish), values
     assert _gone(recorded_pools)
 
 
