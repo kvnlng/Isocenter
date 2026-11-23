@@ -47,6 +47,7 @@ from pydicom.uid import generate_uid
 import isocenter.io_handlers as io_handlers
 from isocenter import parallel
 from isocenter.session import DicomSession
+from isocenter.store import DicomStore
 
 from support.ct_small_files import write_ct
 from support.project_secret import FIXED_A, load_fixed_secret
@@ -588,6 +589,34 @@ def test_a_file_past_the_bound_once_after_a_death_is_read_again(tmp_path,
         io_handlers._WORKER_ENDED_READING), summary.failures
     assert summary.ingested == 3
     assert [uid for uid, _ in _error_rows(db)] == [paths[1]]
+
+
+def test_a_direct_import_on_the_recycling_pool_rejects_the_file_with_its_row(
+        tmp_path, monkeypatch):
+    """`DicomImporter.import_files(executor=None)` under
+    `ISOCENTER_MAX_TASKS_PER_CHILD` reads on the slot pool, which confirms a
+    stopped file alone itself and hands back `_TaskDidNotFinish` in its
+    place. That is the file's rejection, with the bound's reason, and the
+    other files are read; the import does not raise.
+
+    Killing mutation: the marker read as the pool's own failure, which
+    raises `_TaskDidNotFinish` out of the import and loses every file.
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.setenv("ISOCENTER_MAX_TASKS_PER_CHILD", "25")
+    monkeypatch.setenv("ISOCENTER_TASK_TIMEOUT", str(BOUND))
+    _wedge_pools(monkeypatch, functools.partial(_wedge_reading, "WEDGE"))
+    src, paths = _folder(tmp_path, 4, {2: "WEDGE"})
+    outcome = _run_bounded(lambda: io_handlers.DicomImporter.import_files(
+        [str(src)], DicomStore()), 180)
+    assert not outcome["hung"]
+    assert "error" not in outcome, outcome.get("error")
+    summary = outcome["value"]
+    assert summary.ingested == 3
+    assert [p for p, _ in summary.failures] == [paths[2]], summary.failures
+    assert summary.failures[0][1].startswith(
+        io_handlers._RAN_PAST_THE_BOUND.format(bound=BOUND)), summary.failures
+    assert _no_child_left(), multiprocessing.active_children()
 
 
 def test_a_peer_ingest_on_the_stopped_pool_loses_no_file(tmp_path,
