@@ -265,6 +265,7 @@ COMMITTED = {
                           "whole_codestreams-no-frames.dcm",
                           "whole_codestreams-one-frame.dcm"],
     "withheld": ["withheld-1.dcm"],
+    "ybr_ict_source": ["ybr_ict_source.dcm"],
 }
 
 
