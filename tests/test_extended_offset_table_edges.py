@@ -552,9 +552,12 @@ def test_a_dropped_table_naming_no_more_is_counted_as_its_twin_over_a_grid():
                                               offsets, lengths, got, twin))
     assert cells == 1530, cells
     assert not wrong, f"{len(wrong)} of {cells}: {wrong[:5]}"
-    # The grid reaches every arm a table-less file is counted by.
+    # The grid reaches every arm a table-less file is counted by, #1088's
+    # whole codestreams under one declared frame among them.
     assert answers == {None, "Basic Offset Table", "RLE fragments",
-                       "Pixel Data's fragments"}, answers
+                       "Pixel Data's fragments",
+                       imagecodecs_handler.WholeStreams(
+                           "JPEG 2000 codestream")}, answers
 
 
 def _session(tmp_path, ds, name):

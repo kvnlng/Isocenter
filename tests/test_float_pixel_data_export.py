@@ -1288,16 +1288,20 @@ def test_pixel_data_provider_url_is_deleted_and_a_loss_row_says_so(
     assert "0028,7fe0" in rows[0][0], rows
 
 
-def test_a_url_with_no_pixel_element_of_its_own_survives(tmp_path):
-    """Selectivity guard: a URL alone in the top level Data Set is legal.
+def test_a_url_with_no_pixel_element_of_its_own_fails_its_export(tmp_path):
+    """A URL alone in the top level Data Set fails the export (#1097).
 
-    Section 8.2 forbids *more than one* of the four. An instance with no
-    array writes no pixel element, so its Pixel Data Provider URL is the
-    only member present and there is nothing to exclude it with --
-    deleting it there would be pure data loss dressed as conformance.
+    Section 8.2 forbids *more than one* of the four, so a URL alone is
+    legal, and before #1097 such an instance was written with its URL
+    unchanged. That export carried a reference to pixels this library
+    never saw: no redaction zone reached them, and a JPIP URL's query
+    carries the source UIDs. By owner ruling 2026-11-22 (Q13b) an
+    instance of that shape, which only a 1.0.x ingest admitted, now fails
+    its export in the sentence ingest refuses it with, and no file is
+    written. The URL is not quoted.
 
-    This is what fails if either deletion is hoisted above the
-    `arr is not None` gate.
+    The drop of a URL beside written pixels is pinned by the tests
+    around this one; this test is what fails if the refusal is lost.
     """
     from isocenter.entities import Instance
     from isocenter.io_handlers import ExportContext, _export_instance_worker
@@ -1320,13 +1324,10 @@ def test_a_url_with_no_pixel_element_of_its_own_survives(tmp_path):
         series_attributes={"0020,000e": "1.2.4"},
         compression=None))
 
-    assert outcome.ok, outcome.error
-    assert outcome.losses == []
-
-    exported = pydicom.dcmread(out)
-    assert (0x7FE0, 0x0010) not in exported
-    assert (0x7FE0, 0x0008) not in exported
-    assert exported[0x00287FE0].value == "http://example.org/px"
+    assert not outcome.ok
+    assert "Its pixels are held elsewhere" in str(outcome.error)
+    assert "example.org" not in str(outcome.error)
+    assert not os.path.exists(out)
 
 
 def test_a_compressed_integer_export_still_drops_the_url(tmp_path):
