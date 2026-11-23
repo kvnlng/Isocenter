@@ -105,15 +105,16 @@ def test_a_whole_extra_frame_keeps_its_own_row_alone(tmp_path):
 
 
 def test_a_one_bit_frame_is_counted_in_bits():
-    """3x3 at 1 bit is 9 bits, so one frame needs 2 bytes."""
-    ds = _native(3, 3, 2, bits=1)
+    """5x5 at 1 bit is 25 bits, so one frame needs 4 bytes and 6 bytes
+    hold no second frame (48 bits); 8 bytes do, and are the excess row's."""
+    ds = _native(5, 5, 4, bits=1)
     assert native_trailing_words(ds) is None
-    ds = dataset(EXPLICIT_LE, rows=4, cols=4, bits_allocated=1,
-                 native=bytes(4))
+    ds = _native(5, 5, 6, bits=1)
     assert native_trailing_words(ds) == (
-        "Pixel Data holds 4 bytes, where the declared 1 frame of 4x4 "
-        "needs 2 (and one pad byte where that is odd): the 2 bytes beyond "
+        "Pixel Data holds 6 bytes, where the declared 1 frame of 5x5 "
+        "needs 4 (and one pad byte where that is odd): the 2 bytes beyond "
         "it are not a frame and are not in the exported file.")
+    assert native_trailing_words(_native(5, 5, 8, bits=1)) is None
 
 
 def test_ybr_full_422_is_pydicoms():

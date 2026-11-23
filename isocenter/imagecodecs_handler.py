@@ -1089,6 +1089,70 @@ def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     return None
 
 
+def native_trailing_words(ds) -> Optional[str]:
+    """The row for native bytes beyond the declared frames that are no frame (#1090).
+
+    pydicom's rule for a native element, as `_native_excess` reads it,
+    the other way round: the declared frames need ``need`` bytes (in
+    bits for a 1-bit frame, rounded up), and one more byte is the pad an
+    odd length takes (PS3.5 7.1.1). Bytes held past that which do not
+    make one more whole frame are dropped by the decode, and the export
+    has no place for them. A whole further frame is `_native_excess`'
+    row, never this one too. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset.
+
+    Returns:
+        Optional[str]: One sentence naming the bytes held and the bytes
+        the declared frames need, or None: an encapsulated or unreadable
+        syntax, no `PixelData`, `YBR_FULL_422` (pydicom reads its longer
+        buffer as a wrong label), a NumberOfFrames pydicom refuses, a
+        header pydicom cannot set up a runner for, or no such bytes.
+    """
+    try:
+        if ds.file_meta.TransferSyntaxUID.is_encapsulated:
+            return None
+    except (AttributeError, ValueError):
+        return None
+    if "PixelData" not in ds:
+        return None
+    if "NumberOfFrames" in ds and ds.NumberOfFrames not in (None, ""):
+        try:
+            if int(ds.NumberOfFrames) < 0:
+                return None
+        except (TypeError, ValueError):
+            return None
+    elif "NumberOfFrames" in ds and ds.NumberOfFrames == "":
+        # `''` set in memory: pydicom refuses it in its own words.
+        return None
+    declared = declared_frame_count(ds)
+    try:
+        runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
+        runner.set_source(ds)
+        if runner.photometric_interpretation == "YBR_FULL_422":
+            return None
+        rows, cols = int(runner.rows), int(runner.columns)
+        samples = int(runner.samples_per_pixel)
+        frame_bits = rows * cols * samples * int(runner.bits_allocated)
+        held = len(ds.PixelData)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if frame_bits <= 0:
+        return None
+    need = -(-frame_bits * declared // 8)
+    if held <= need + need % 2 or held * 8 // frame_bits > declared:
+        return None
+    shape = f"{rows}x{cols}" + (f"x{samples}" if samples > 1 else "")
+    one = declared == 1
+    return (f"Pixel Data holds {held} bytes, where the declared {declared} "
+            f"{'frame' if one else 'frames'} of {shape} "
+            f"{'needs' if one else 'need'} {need} (and one pad byte where "
+            f"that is odd): the {held - need} bytes beyond "
+            f"{'it' if one else 'them'} are not a frame and are not in the "
+            f"exported file.")
+
+
 #: `_header_verdict`'s three answers. `UNASKED` means only that the
 #: question could not be put to pydicom: its runner, or the runner's
 #: `_validate_options`, is not there to ask.

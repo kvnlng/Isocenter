@@ -303,16 +303,17 @@ def _native(rows, cols, bits, payload, **kwargs):
 
 
 @pytest.mark.parametrize("ds", [
-    # 15 bits a frame: pydicom's excess arithmetic divides by 1.875 and
-    # raises TypeError rather than return frames.
-    _native(3, 5, 1, bytes(4), frames=1),
+    # (A 1-bit frame of 15 bits under 4 bytes stood here: pydicom's
+    # default excess arithmetic raises for it. Since #1094 it is counted
+    # in bits and its declared frame kept, which
+    # `test_a_one_bit_file_keeps_its_declared_frames.py` pins.)
     # Twice the 4:2:2 frame length: pydicom reads a longer 4:2:2 buffer as
     # a wrong label ("a third larger than expected"), not as frames.
     _native(2, 2, 8, bytes(16), frames=1, samples=3,
             photometric="YBR_FULL_422"),
     # A count pydicom refuses ("must be greater than or equal to 1").
     _native(2, 2, 8, bytes(12), frames=-1),
-], ids=["one-bit-part-byte", "ybr-full-422", "negative-frames"])
+], ids=["ybr-full-422", "negative-frames"])
 def test_a_native_buffer_pydicom_does_not_read_as_frames_is_not_counted(ds):
     """The native count is pydicom's rule, including where pydicom declines.
 
@@ -438,14 +439,17 @@ def test_as_many_fragments_as_frames_is_not_an_excess():
     assert imagecodecs_handler.offset_table_frame_count(ds) is None
 
 
-def test_one_declared_frame_over_many_fragments_is_the_stated_limit():
+def test_one_declared_frame_over_many_whole_streams_is_counted():
     """S12: pydicom joins every fragment into one frame under NOF 1.
 
-    No pre-decode count can see an excess here, and none is claimed.
-    Pinned so nobody believes this shape is covered.
+    pydicom's walk sees no excess here. This was the stated limit until
+    #1088: where every fragment is a whole codestream, the fragments are
+    now counted as frames (`_whole_stream_fragments`).
     """
     for frames in (1, None):
         ds = _no_table(J2K_LOSSLESS, [U, U2, U3], frames=frames)
         assert len(list(generate_fragmented_frames(
             ds.PixelData, number_of_frames=1))) == 1
-        assert imagecodecs_handler.offset_table_frame_count(ds) is None
+        assert imagecodecs_handler.offset_table_frame_count(ds) == (
+            3, 1, frames,
+            imagecodecs_handler.WholeStreams("JPEG 2000 codestream"))

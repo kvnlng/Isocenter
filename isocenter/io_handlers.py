@@ -139,6 +139,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   decode_declared_frames, extended_offsets,
                                   frame_precisions,
                                   frame_count_mismatch_words,
+                                  native_trailing_words,
                                   offset_table_frame_count,
                                   read_one_per_fragment,
                                   refusal_before_decode,
@@ -5543,6 +5544,14 @@ def ingest_worker(fp: str) -> Tuple:
                 if read_one_per_fragment(counted[3]):
                     decode_kwargs['number_of_frames'] = counted[0]
                 meta['offset_table_excess'] = counted
+            else:
+                # Bytes beyond the declared frames that are not a whole
+                # frame (#1090): the decode drops them and the export has
+                # no place for them. Only where no excess was counted, so
+                # one file never gets both rows.
+                trailing = native_trailing_words(ds)
+                if trailing is not None:
+                    meta['native_trailing'] = trailing
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds.
             high_bit_mismatch = _high_bit_mismatch(ds)
@@ -6511,6 +6520,21 @@ class DicomImporter:
                                 entity_uid=inst.sop_instance_uid,
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_SIGNAL)
+
+                    # Native bytes beyond the declared frames that are not
+                    # a frame (#1090). STANDARD, by owner ruling
+                    # (2026-11-22): the bytes are not a frame, and the
+                    # export is no less complete as an image without
+                    # them, so the row is listed and does not cost PASS.
+                    trailing = meta.get('native_trailing')
+                    if trailing:
+                        logger.warning(f"{inst.sop_instance_uid}: {trailing}")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="DATA_LOSS",
+                                entity_uid=inst.sop_instance_uid,
+                                details=trailing,
+                                loss_scope=LOSS_SCOPE_STANDARD)
 
                     # Multi-rate records are not supported, so the groups
                     # are dropped; the drop must never be silent. A record
