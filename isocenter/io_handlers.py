@@ -130,7 +130,7 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  RLE_FRAGMENTS, T81_SYNTAXES,
+                                  T81_SYNTAXES,
                                   _j2k_irreversible,
                                   _jpeg_frame_type, _sign_extend,
                                   _jpegls_near, _stream_precision,
@@ -140,6 +140,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
+                                  read_one_per_fragment,
                                   refusal_before_decode,
                                   validate_without_the_table)
 from .parallel import (run_parallel, _resolve_strategy,
@@ -3220,19 +3221,24 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         arr, photometric = _decode_with_imagecodecs(ds, allow_excess_frames,
                                                     exc, beyond)
     else:
+        # The excess of a count read one per fragment (an RLE buffer,
+        # whole codestreams), dropped here because `allow_excess_frames`
+        # cannot drop it: the count it truncates against is the
+        # `number_of_frames` just overridden. Read through
+        # `declared_frame_count`, the same reading the row names, so the
+        # frames kept and the frames reported cannot drift apart. On
+        # pydicom's route only: the fallback decodes the declared frames
+        # and no more, and `arr[0]` of its one frame is its first row
+        # (#1088). Before the extension, which reads one precision per
+        # declared frame.
+        if number_of_frames is not None and allow_excess_frames is False:
+            kept = declared_frame_count(ds)
+            arr = arr[0] if kept == 1 else arr[:kept]
         # pydicom's decode only, outside the `try`: the fallback extends
         # its own (`_decode_frame`), and a refusal here is not a reason to
         # ask it.
         if wider is not None:
             arr = _extend_each_frame(arr, ds, wider)
-    # The RLE excess, dropped here because `allow_excess_frames` cannot
-    # drop it: the count it truncates against is the `number_of_frames`
-    # just overridden. Read through `declared_frame_count`, the same
-    # reading the row names, so the frames kept and the frames reported
-    # cannot drift apart.
-    if number_of_frames is not None and allow_excess_frames is False:
-        kept = declared_frame_count(ds)
-        arr = arr[0] if kept == 1 else arr[:kept]
     # Native byte order, at the one exit every door leaves by. pydicom
     # returns a big-endian source in the file's own order (`>u2`, `>i2`,
     # `>u4`) with the right *values*, and every caller that stores the
@@ -3517,12 +3523,17 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
                 f"was not asked to drop the excess") from pydicom_error
     frames = (counted[1] if counted is not None
               else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
+    # Whole codestreams under one declared frame are walked one per
+    # fragment, or the generator joins them and the first stream's
+    # decoder meets the second (#1088).
+    held = (counted[0] if counted is not None
+            and read_one_per_fragment(counted[3]) else None)
 
     try:
         # `beyond` is filled only here, on the fallback route: a pydicom
         # plugin decodes before this is asked, and that route's clamp is
         # what #671 accepted as route-dependent (#682).
-        arr = decode_declared_frames(ds, frames, beyond)
+        arr = decode_declared_frames(ds, frames, beyond, held)
     except Exception as exc:  # pylint: disable=broad-except
         # The fallback walks the frames with pydicom's own generator, so
         # a buffer that generator refuses fails both decodes in one
@@ -4399,7 +4410,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                 # The top level's RLE frame-count keyword, at this depth:
                 # without it an icon with an empty table and excess RLE
                 # fragments gets the row and then still joins its fragments.
-                if counted[3] == RLE_FRAGMENTS:
+                if read_one_per_fragment(counted[3]):
                     decode_kwargs["number_of_frames"] = counted[0]
             # The top level's HighBit header rule, at this depth.
             # After the borrow, because it reads the transfer syntax off
@@ -5528,7 +5539,8 @@ def ingest_worker(fp: str) -> Tuple:
                 # fragments again and `allow_excess_frames` truncates
                 # nothing. One counter feeds both, so the frames
                 # decoded and the frames this row names are one number.
-                if counted[3] == RLE_FRAGMENTS:
+                # Whole codestreams under one declared frame too (#1088).
+                if read_one_per_fragment(counted[3]):
                     decode_kwargs['number_of_frames'] = counted[0]
                 meta['offset_table_excess'] = counted
             # Asked of the header before the decode, so both decoders'

@@ -129,13 +129,24 @@ def test_a_session_ingest_writes_the_data_loss_row(tmp_path):
 
 @pytest.mark.parametrize("ts", ["1.2.840.10008.1.2.4.90",
                                 "1.2.840.10008.1.2.4.50"])
-def test_the_fallback_route_reads_frame_0(tmp_path, ts):
-    """Red if the fallback walks the joined buffer: it then reads the
-    first stream of the two joined, or fails on the second, by decoder."""
+def test_the_fallback_route_reads_frame_0(tmp_path, ts, monkeypatch):
+    """The codec is handed frame 0's stream alone. Red if the fallback
+    walks the joined buffer: every decoder installed here reads the first
+    stream of a joined buffer and ignores the rest, so the array alone
+    cannot tell, and the bytes handed to the codec are asserted."""
+    from isocenter import imagecodecs_handler
+    real, handed = imagecodecs_handler._decode_frame, []
+
+    def spy(transfer_syntax, bitstream, ds, beyond=None):
+        handed.append(bytes(bitstream))
+        return real(transfer_syntax, bitstream, ds, beyond)
+    monkeypatch.setattr(imagecodecs_handler, "_decode_frame", spy)
+    first = _streams(ts)[0]
     path = write(tmp_path, _file(ts, _streams(ts)))
     arr, _label = through_the_fallback(pydicom.dcmread(path),
                                        allow_excess_frames=False,
                                        number_of_frames=2)
+    assert [h.rstrip(b"\0") for h in handed] == [first]
     assert arr.shape == (4, 4)
     assert np.array_equal(arr, _frame_0_alone(tmp_path, ts))
 

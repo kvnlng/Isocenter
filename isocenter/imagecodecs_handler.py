@@ -49,14 +49,19 @@ an excess is reported. RLE has no end marker, so `_rle_fragment_frames`
 counts an RLE buffer's fragments as its frames instead, where there are
 more of them than declared frames and every one begins an RLE frame
 header, and `io_handlers._decode_pixels` is told that count so pydicom
-reads them one per frame.
+reads them one per frame. Under NumberOfFrames 1, or absent, pydicom
+does not walk at all: it joins every fragment into one frame. Where each
+fragment is a whole stream of a marker-delimited syntax (start marker to
+end marker), `_whole_stream_fragments` counts the fragments as frames,
+and the decode is told that count too (#1088). A native 1-bit frame
+that is not a whole number of bytes is counted in bits (`_native_excess`,
+#1094).
 
-**Limits.** Two shapes remain uncounted. NumberOfFrames 1, or absent,
-over several fragments with no table **under any syntax but RLE**: the
-walk joins every fragment into one frame, so no excess is visible before
-the decode, and none after it either. And a native 1-bit frame that is
-not a whole number of bytes, where pydicom's own excess arithmetic
-raises rather than return the frames (`_native_excess`).
+**Limits.** NumberOfFrames 1, or absent, over several fragments with no
+table, where the fragments are not each a whole stream: the frames are
+read as one joined frame, and no excess is visible. And whole streams
+under a populated Basic Offset Table that names one frame: the table
+names the frames, and pydicom reads by it.
 """
 # Every caller of the frame count goes through `offset_table_frame_count`,
 # so none of them can disagree about what a mismatch is. Do not add a
@@ -286,8 +291,9 @@ def supports_transfer_syntax(transfer_syntax):
 #: What `offset_table_frame_count` returns: ``(table_frames,
 #: declared_frames, declared_raw, table_name)``. ``declared_raw`` is
 #: NumberOfFrames as the file states it -- an int, ``""`` when the element
-#: is present and empty, None when it is absent.
-FrameCount = Tuple[int, int, Optional[Union[int, str]], str]
+#: is present and empty, None when it is absent. ``table_name`` is a
+#: string, or a `NativeBits` or `WholeStreams` marker.
+FrameCount = Tuple[int, int, Optional[Union[int, str]], Union[str, tuple]]
 
 
 def extended_offsets(ds) -> Optional[Tuple[bytes, bytes]]:
@@ -678,6 +684,13 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
         fragments = _rle_fragment_frames(ds, declared)
         if fragments is not None:
             return (fragments, declared, declared_raw, RLE_FRAGMENTS)
+        # Whole codestreams under one declared frame (#1088), before the
+        # walk, which does not run under one: pydicom joins the fragments
+        # and decodes the first stream, so the others were lost with no
+        # row.
+        whole = _whole_stream_fragments(ds, declared)
+        if whole is not None:
+            return (whole[0], declared, declared_raw, whole[1])
         return _walked_excess(ds, declared, declared_raw)
     return (len(offsets), declared, declared_raw, "Basic Offset Table")
 
@@ -829,6 +842,112 @@ NATIVE_FRAMES = "Pixel Data's length"
 #: end markers" -- which is false of a stream that has no end marker. The
 #: two share a subject and not a verb, so they cannot share a value.
 RLE_FRAGMENTS = "RLE fragments"
+
+
+class WholeStreams(NamedTuple):
+    """The marker for fragments counted as whole codestreams (#1088).
+
+    Carries the stream's name for the row ("JPEG 2000 codestream", "JPEG
+    stream", "JPEG-LS stream"). A module-level class, so a count pickles
+    across `ingest_worker`'s process boundary in `meta`.
+    """
+
+    stream: str
+
+
+def read_one_per_fragment(table_name) -> bool:
+    """Is this count's every fragment one frame, which the decode must be told?
+
+    True for `RLE_FRAGMENTS` and a `WholeStreams` marker. pydicom joins
+    such fragments into one frame unless it is handed their count as
+    `number_of_frames`, so `ingest_worker` and `_decode_nested_pixels`
+    pass it, and `io_handlers._decode_pixels` keeps the declared frames.
+
+    Args:
+        table_name: The fourth member of a `FrameCount`.
+
+    Returns:
+        bool: Whether the decode reads one frame per fragment.
+    """
+    return table_name == RLE_FRAGMENTS or isinstance(table_name, WholeStreams)
+
+
+#: The start of a whole stream, by syntax: SOC then SIZ for a JPEG 2000
+#: (and HTJ2K) codestream, SOI for a T.81 or JPEG-LS stream. Each ends
+#: with `_STREAM_END` (EOC, or EOI, both FFD9).
+_STREAM_END = b"\xff\xd9"
+
+
+def _stream_start(transfer_syntax) -> Optional[Tuple[bytes, str]]:
+    """The start marker and name of a whole stream under this syntax, or None."""
+    if transfer_syntax in J2K_SYNTAXES:
+        return b"\xff\x4f\xff\x51", "JPEG 2000 codestream"
+    if transfer_syntax in T81_SYNTAXES:
+        return b"\xff\xd8", "JPEG stream"
+    if transfer_syntax in JPEGLS_SYNTAXES:
+        return b"\xff\xd8", "JPEG-LS stream"
+    return None
+
+
+def _whole_stream_fragments(ds, declared) -> Optional[Tuple[int, WholeStreams]]:
+    """Fragments that are each a whole stream, under one declared frame, or None.
+
+    Asked only where no offset table names the frames and the buffer is
+    not RLE. Counts only under one declared frame (NumberOfFrames 1,
+    absent or 0: pydicom walks the fragments under two or more, and
+    `_walked_excess` counts that walk), for a marker-delimited syntax
+    (`_stream_start`), when there are more fragments than declared and
+    **every** fragment begins with the stream's start marker and ends
+    with its end marker once trailing `0x00` padding is stripped.
+
+    Args:
+        ds (pydicom.Dataset): The dataset.
+        declared (int): The declared frames (`declared_frame_count`).
+
+    Returns:
+        Optional[Tuple[int, WholeStreams]]: The fragment count and the
+        marker naming the stream, or None -- also for a buffer that cannot
+        be parsed (the decoder that runs next refuses it).
+    """
+    # Both ends of every fragment, never one: a frame split across
+    # fragments has a first fragment with no end marker and later ones
+    # with no start marker, and pydicom joins and decodes such a frame
+    # correctly, so a count here would turn a readable file into a row
+    # and a lost image. FFD9 at a fragment's end is a marker: JPEG
+    # entropy data stuffs every FF with 00, and in a JPEG 2000 codestream
+    # FF is never followed by a byte above 0x8F inside packet data. The
+    # nine multi-fragment single-frame files of the fingerprint's cohort
+    # are split frames, and the test is false for every one.
+    #
+    # A populated Basic Offset Table naming one frame over such fragments
+    # is not asked: the table names the frames, and pydicom reads by it.
+    if declared != 1:
+        return None
+    try:
+        start = _stream_start(ds.file_meta.TransferSyntaxUID)
+    except (AttributeError, ValueError):
+        return None
+    if start is None:
+        return None
+    marker, name = start
+    try:
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        fragments, _offsets = parse_fragments(buf)
+        if fragments <= declared:
+            return None
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        for fragment in generate_fragments(buf):
+            fragment = bytes(fragment)
+            if not (fragment.startswith(marker)
+                    and fragment.rstrip(b"\0").endswith(_STREAM_END)):
+                return None
+    except Exception:  # pylint: disable=broad-except
+        # Not this check's refusal to make: the decoder that runs next
+        # meets the same buffer and refuses it in its own words.
+        return None
+    return fragments, WholeStreams(name)
 
 
 class NativeBits(NamedTuple):
@@ -1295,7 +1414,10 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
                 f"{bits} {'bit' if bits == 1 else 'bits'}; {declared_words}, "
                 f"which {'needs' if declared == 1 else 'need'} {need} "
                 f"{'byte' if need == 1 else 'bytes'}")
-    if table_name == RLE_FRAGMENTS:
+    if isinstance(table_name, WholeStreams):
+        counted_words = (f"{WALKED_FRAMES} hold {frames}, one whole "
+                         f"{table_name.stream} per fragment")
+    elif table_name == RLE_FRAGMENTS:
         counted_words = f"{WALKED_FRAMES} hold {frames}, one per fragment"
     elif table_name == WALKED_FRAMES:
         counted_words = f"{table_name} hold {frames} by their end markers"
@@ -2151,7 +2273,7 @@ def _masked_beyond_precision(raw, ds, precision, width, beyond):
                   width=width or int(getattr(ds, "BitsStored", 0) or 0))
 
 
-def decode_declared_frames(ds, number_of_frames, beyond=None):
+def decode_declared_frames(ds, number_of_frames, beyond=None, held=None):
     """Decode the first `number_of_frames` frames, and ask nothing else.
 
     For `io_handlers._decode_pixels`' fallback. **It does not compare
@@ -2163,6 +2285,9 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
         number_of_frames (int): How many frames to decode, from the first.
         beyond (dict, optional): Handed to every frame's `_decode_frame`
             (#682).
+        held (int, optional): The frames the buffer holds one per fragment
+            (`read_one_per_fragment`), walked by so that each fragment is
+            a frame (#1088); the first `number_of_frames` are decoded.
 
     Returns:
         np.ndarray: the frame for one, the frames stacked for more. The
@@ -2199,8 +2324,11 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
     try:
         frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
                   for bitstream in islice(
+                      # `held`, not the declared count, for whole
+                      # streams: under one declared frame the generator
+                      # joins every fragment into one buffer (#1088).
                       generate_frames(ds.PixelData,
-                                      number_of_frames=number_of_frames,
+                                      number_of_frames=held or number_of_frames,
                                       extended_offsets=extended_offsets(ds)),
                       number_of_frames)]
     except delayed:
