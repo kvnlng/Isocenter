@@ -27,6 +27,7 @@ because a mistaken first stop costs nothing by design.
 """
 import concurrent.futures
 import functools
+import json
 import logging
 import multiprocessing
 import os
@@ -874,3 +875,133 @@ def test_an_export_that_never_finishes_one_instance_returns_with_one_row(
     written = [p.name for p in out.rglob("*.dcm")]
     assert len(written) == 2 and not [n for n in written if chosen in n]
     assert _gone(started), "a worker of the export's pool is still running"
+
+
+def _hang_after_writing():
+    """Pool initializer: the export worker writes its instance, file and all,
+    and then never returns."""
+    # pylint: disable=import-outside-toplevel
+    from isocenter import io_handlers as handlers
+    real = handlers._export_instance_worker
+
+    def written_then_wedged(ctx):
+        real(ctx)
+        while True:
+            time.sleep(3600)
+
+    handlers._export_instance_worker = written_then_wedged
+
+
+def _locked_session_of_one(tmp_path):
+    """A session holding one CT instance of patient `P6730`, its identity
+    locked, so every exported dataset carries the token."""
+    write_ct(tmp_path / "in" / "0.dcm", "P6730", "6730")
+    session = DicomSession(str(tmp_path / "s.db"))
+    load_fixed_secret(session, tmp_path, FIXED_A)
+    assert not session.ingest(str(tmp_path / "in")).failures
+    session.enable_reversible_anonymization(str(tmp_path / "test.key"))
+    session.lock_identities("P6730")
+    return session
+
+
+def _rows_of(db, action):
+    with sqlite3.connect(db) as conn:
+        return [details for (details,) in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type = ? "
+            "ORDER BY id", (action,))]
+
+
+def test_a_plugin_write_that_never_returns_counts_for_the_disclosure(
+        tmp_path, monkeypatch):
+    """A plugin's `write()` keeps the token-bearing dataset it was handed
+    and never returns. It is stopped twice and the instance is rejected;
+    the plugin kept the token all the same, so the recoverable-identity
+    disclosure counts the instance (owner ruling Q-A on #783: the parent
+    cannot tell whether `write()` was reached, so a plugin's stopped
+    instance counts as handed). The `ERROR` row does not say that no file
+    was written, which the parent cannot know of a plugin.
+
+    Killing mutation: a stopped instance's outcome built with `handed`
+    False (found in the review of #673).
+    """
+    # pylint: disable=import-outside-toplevel
+    from isocenter import exporters
+    from support import plugin_exporters as plugins
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.setenv("ISOCENTER_TASK_TIMEOUT", str(BOUND))
+    started = []
+    monkeypatch.setattr(parallel._SlotPool, "_started",
+                        lambda self, process: started.append(process))
+    monkeypatch.setitem(exporters._REGISTRY, "writethenhang",
+                        plugins.WriteThenHang)
+    out = tmp_path / "out"
+    db = str(tmp_path / "s.db")
+    with _locked_session_of_one(tmp_path) as session:
+        try:
+            outcome = _run_bounded(lambda: session.export(
+                str(out), format="writethenhang"), 180)
+        finally:
+            for process in list(started):
+                try:
+                    process.kill()
+                except (OSError, ValueError):
+                    pass
+        assert not outcome["hung"]
+        assert isinstance(outcome.get("error"), io_handlers.ExportError), \
+            outcome
+        session.store_backend.flush_audit_queue()
+    # The premise: the plugin was handed the token, and kept it, twice.
+    with open(out / "kept.jsonl", encoding="utf-8") as handle:
+        kept = [json.loads(line) for line in handle]
+    assert len(kept) == 2 and all(entry["has_token"] for entry in kept), kept
+    assert _rows_of(db, "REVERSIBLE_EXPORT") == [
+        "1 of 1 exported instances carry encrypted original identities "
+        "(0400,0500). They are recoverable with the session key; treat the "
+        "export as re-identifiable by any holder of it."]
+    [error] = _rows_of(db, "ERROR")
+    assert "ISOCENTER_TASK_TIMEOUT" in error, error
+    assert "no file was written" not in error, error
+    assert "handed" in error, error
+    assert _gone(started)
+
+
+def test_a_dicom_file_written_before_its_worker_was_stopped_is_said(
+        tmp_path, monkeypatch):
+    """The built-in worker writes and renames its file, and then never
+    returns. The instance is rejected, and its `ERROR` row says a file is
+    at its planned path, which is not counted as written: never that no
+    file was written, with the file in the output folder.
+
+    Killing mutation: the row's text fixed as "no file was written under
+    its name" (found in the review of #673).
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.setenv("ISOCENTER_TASK_TIMEOUT", str(BOUND))
+    started = []
+    monkeypatch.setattr(parallel._SlotPool, "_started",
+                        lambda self, process: started.append(process))
+    out = tmp_path / "out"
+    db = str(tmp_path / "s.db")
+    with _locked_session_of_one(tmp_path) as session:
+        with monkeypatch.context() as wedging:
+            wedging.setattr(parallel, "resolve_worker_initializer",
+                            lambda disable_gc=False: _hang_after_writing)
+            try:
+                outcome = _run_bounded(lambda: session.export(
+                    str(out), use_compression=False), 180)
+            finally:
+                for process in list(started):
+                    try:
+                        process.kill()
+                    except (OSError, ValueError):
+                        pass
+        assert not outcome["hung"]
+        assert isinstance(outcome.get("error"), io_handlers.ExportError), \
+            outcome
+        session.store_backend.flush_audit_queue()
+    assert len(list(out.rglob("*.dcm"))) == 1
+    [error] = _rows_of(db, "ERROR")
+    assert "no file was written" not in error, error
+    assert "a file is at its planned path" in error, error
+    assert "not counted as written" in error, error
+    assert _gone(started)
