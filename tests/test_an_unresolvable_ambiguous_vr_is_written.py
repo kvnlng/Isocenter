@@ -229,6 +229,28 @@ def test_a_waveform_item_with_no_bits_allocated_is_written_and_named(tmp_path):
         "reader interprets those bytes."]
 
 
+def test_a_zero_length_waveform_bits_allocated_keeps_the_signal(tmp_path):
+    """Waveform Bits Allocated is there with no value, and pydicom's
+    resolver cannot compare it with 8 (`None > 8`, a `TypeError`). That is
+    the decider failing, as for LUT Data beside a short descriptor (#703),
+    not a value pydicom could not convert, so #972's narrowing must not
+    take it for one: the Waveform Data and its padding are written `OW`
+    under the WARNING, as before #972, never dropped under a row that
+    quotes the interpreter (X5 review). A stated text value (`CS '16'`)
+    does not reach the resolver from a file: the integer gate drops the
+    sibling first, and the two take the no-sibling arm."""
+    ds = _waveform(_dataset(), declare_bits=False, minmax=False, padding=True)
+    ds.WaveformSequence[0].add_new(0x54001004, "US", None)
+    written, db = _export(tmp_path, ds, compress=True)
+    assert _element(written, WAVEFORM_PATH, WAVEFORM_DATA) == (
+        "OW", b"\x00\x00\x32\x00\xce\xff\x64\x00")
+    assert _element(written, WAVEFORM_PATH, WAVEFORM_PADDING) == (
+        "OW", b"\xff\xff")
+    assert _rows(db, "DATA_LOSS") == []
+    (row,) = _rows(db, "WARNING")
+    assert row.startswith("Ambiguous value representations (5400,100a)")
+
+
 def test_one_row_names_ten_elements_and_counts_the_rest(tmp_path):
     """A 12-channel ECG whose multiplex group never declared its bit depth
     carries 25 elements this pass had to choose an arm for -- 24 channel

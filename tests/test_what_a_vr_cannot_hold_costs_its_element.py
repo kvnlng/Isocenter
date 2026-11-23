@@ -823,6 +823,27 @@ def test_only_lut_data_takes_the_unresolved_arm_on_a_typeerror(monkeypatch):
     assert ds[0x00283006].VR == "OW" and losses == []
 
 
+@pytest.mark.parametrize("bits", [None, "16"], ids=["none", "text"])
+def test_a_waveform_sibling_pydicom_cannot_compare_is_unresolved(bits):
+    """X5 review, #972. pydicom's `OB or OW` waveform arm reads
+    `WaveformBitsAllocated > 8`, and a sibling holding no value or text
+    raises `TypeError` there: the decider failing, as LUT Data's
+    subscript does, not a value pydicom could not convert. Both are
+    unresolved and written `OW`, as before #972 (`'16'` takes its width
+    from `_waveform_bits`). Only the `US or SS` arm, which converts the
+    value, re-raises (the test above)."""
+    ds, item = Dataset(), Dataset()
+    item.add_new(0x54001004, "US", bits)
+    item.add_new(0x5400100A, "OB or OW", b"\x00\x80")
+    item.add_new(0x54001010, "OB or OW", b"\x01\x00\x02\x00")
+    ds.add_new(0x54000100, "SQ", pydicom.sequence.Sequence([item]))
+    losses, warnings = [], []
+    io_handlers._resolve_ambiguous_vrs(ds, losses, warnings)
+    written = ds[0x54000100][0]
+    assert losses == []
+    assert (written[0x5400100A].VR, written[0x54001010].VR) == ("OW", "OW")
+
+
 # -- T13: a plain list is handed back without a scan ---------------------------
 
 def test_python_value_hands_a_plain_list_back_without_a_scan():
