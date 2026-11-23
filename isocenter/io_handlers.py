@@ -13604,23 +13604,49 @@ def _outcome_of_a_task_not_finished(stopped) -> "ExportOutcome":
             `ExportContext`.
 
     Returns:
-        ExportOutcome: `ok=False`, its UID and plan position, and an
-        `error` naming the bound and no path.
+        ExportOutcome: `ok=False`, its UID and plan position, an `error`
+        naming the bound and no path, and `handed` True for a plugin's
+        instance.
     """
     ctx = stopped.item
+    writer = getattr(ctx, "writer", None)
+    refused = getattr(ctx, "refusal", None) is not None
+    # A plugin's instance counts as handed (owner ruling Q-A on #783): the
+    # worker was stopped, so whether `write()` was reached, and what it
+    # kept of the dataset, cannot be read here. A `write()` that keeps the
+    # token and then never returns (a stuck upload) holds it all the same,
+    # and the recoverable-identity disclosure must count it. This also
+    # counts an instance stopped before `write()` was reached: a disclosure
+    # too many, never one too few. An instance refused before `write()`
+    # raises at once and never reaches the bound.
+    handed = writer is not None and not refused
+    output_path = getattr(ctx, "output_path", None)
+    if writer is not None:
+        what = ("the exporter was handed its dataset, and what it wrote or "
+                "kept of it is not known")
+    elif output_path and os.path.exists(output_path):
+        # The worker writes its file and renames it into place before it
+        # returns, so a worker stopped after the rename leaves the file
+        # (review of #673). It may also be a file an earlier export left
+        # under the same name. Either way it is not counted as written:
+        # nothing this export reports vouches for it.
+        what = ("a file is at its planned path, which a stopped worker may "
+                "have written; it is not counted as written")
+    else:
+        what = "no file is at its planned path"
     # Text, not the exception: `_report_export_failures` keeps a string as
     # given, and the class name would add nothing a reader needs. It names
     # no path (the output path is `Subject_<Patient ID>/...`).
     return ExportOutcome(
-        ok=False, output_path=getattr(ctx, "output_path", None),
+        ok=False, output_path=output_path,
         sop_instance_uid=getattr(getattr(ctx, "instance", None),
                                  "sop_instance_uid", None),
         error=(f"its export did not finish within the {stopped.bound:g} s "
-               f"bound (ISOCENTER_TASK_TIMEOUT), and run again alone on a "
-               f"fresh worker process it did not finish within it a second "
-               f"time; both workers were stopped, and no file was written "
-               f"under its name"),
-        position=getattr(ctx, "position", None))
+               f"bound (ISOCENTER_TASK_TIMEOUT) twice, the second time "
+               f"alone on a fresh worker process, and each worker it ran on "
+               f"was stopped; {what}"),
+        position=getattr(ctx, "position", None),
+        handed=handed)
 
 
 def _in_plan_order(results) -> list:

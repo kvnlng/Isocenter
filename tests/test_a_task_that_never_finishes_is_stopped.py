@@ -872,6 +872,7 @@ def test_an_export_that_never_finishes_one_instance_returns_with_one_row(
     detail = added[0][1]
     assert detail.startswith(f"Export failed for instance {chosen}: "), detail
     assert f"{BOUND} s" in detail and "ISOCENTER_TASK_TIMEOUT" in detail
+    assert detail.endswith("no file is at its planned path"), detail
     written = [p.name for p in out.rglob("*.dcm")]
     assert len(written) == 2 and not [n for n in written if chosen in n]
     assert _gone(started), "a worker of the export's pool is still running"
