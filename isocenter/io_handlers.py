@@ -4537,17 +4537,18 @@ _NO_INGEST_WORKER_STARTS = (
     "killed as it starts")
 
 
-#: The reason a file is failed with when it was not returned before a worker
-#: process ended or was stopped, and then a fresh one-worker pool, which had
-#: run a trivial task and nothing else, did not return it within the time
-#: bound as the first file it was given (#673; owner rulings Q7, Q8). Takes
+#: The reason a file is failed with when a pool was stopped once already
+#: while this call waited on it past the time bound, and then a fresh
+#: one-worker pool, which had run a trivial task and nothing else, did not
+#: return it within the bound as the first file it was given (#673; owner
+#: rulings Q7, Q8). Takes
 #: `bound`. A constant because tests match its prefix and the CHANGELOG
 #: quotes it.
 _RAN_PAST_THE_BOUND = (
-    "An ingest worker process ended or was stopped before this file was "
-    "returned, and a fresh worker process given this file alone, as its "
-    "first file, did not return it within the {bound:g} s bound "
-    "(ISOCENTER_TASK_TIMEOUT) and was stopped")
+    "An ingest worker process was stopped while this file was not returned "
+    "within the {bound:g} s bound (ISOCENTER_TASK_TIMEOUT), and a fresh "
+    "worker process given this file alone, as its first file, did not "
+    "return it within the bound either and was stopped")
 
 #: The least time the trivial task ahead of a one-at-a-time round gets,
 #: whatever the bound (#673). It runs on a worker that has only just been
@@ -4650,11 +4651,15 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     # by how long this call waits on one file (`parallel._HeadWatch`), which
     # accuses no file: a stop there writes no row and sends the files not
     # yet returned to the one-at-a-time rounds below, where one worker
-    # reads one file and the same watch is exact (owner ruling Q9). Only a
-    # file not returned in time by a fresh worker that ran the trivial task
-    # and then this file first is rejected; that is its second run past the
-    # bound, the first being the stop that sent it here (owner ruling Q8).
+    # reads one file and the same watch is exact (owner ruling Q9). A file
+    # is rejected only at its second stop, and only when that stop is in a
+    # one-at-a-time round with the file first (owner ruling Q8).
     bound = resolve_task_timeout()
+    # Every file a stop was made on: the file the call was waiting on when
+    # a watch fired. Never inferred from the round alone -- a
+    # one-at-a-time round entered on a death, not on a stop, holds a file
+    # no stop has been made on yet, and its first stop is its first.
+    stopped_once = set()
     canary_bound = None if bound is None else max(bound, _CANARY_FLOOR_S)
     pending = list(files)
     first = True
@@ -4759,6 +4764,12 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 and on_executor_broken is not None):
             on_executor_broken(executor)
         first = False
+        stopped_before = False
+        if isinstance(failure, _RanPastTheBound) and delivered < len(batch):
+            # Ordered, so the result waited on is `batch[delivered]`.
+            held = batch[delivered]
+            stopped_before = held in stopped_once
+            stopped_once.add(held)
         if failure is None:
             pending = pending[len(batch):]
             alone = 0
@@ -4783,11 +4794,23 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 "first on another fresh worker.",
                 describe_exception(failure), delivered)
             continue
+        if alone and isinstance(failure, _RanPastTheBound) \
+                and not stopped_before:
+            # One worker, behind the canary, and this file first, so the
+            # stop is this file's own; but its first (owner ruling Q8). A
+            # one-at-a-time round entered on a death reaches here. Read it
+            # again, first, on another fresh worker, with no row.
+            logger.warning(
+                "An ingest worker process given one file alone was stopped "
+                "past the %g s bound (ISOCENTER_TASK_TIMEOUT); reading that "
+                "file once more, first, on another fresh worker before it is "
+                "reported (#673).", bound)
+            continue
         if alone and isinstance(failure, _RanPastTheBound):
             # One worker, behind the canary, and this file first: the file
-            # it was stopped on is the file not returned in time (#673).
-            # Its own row; never `_WORKER_ENDED_READING`, which says the
-            # worker ended on its own.
+            # it was stopped on is the file not returned in time, a second
+            # time (#673). Its own row; never `_WORKER_ENDED_READING`, which
+            # says the worker ended on its own.
             yield _failed_result(batch[0],
                                  _RAN_PAST_THE_BOUND.format(bound=bound))
             pending = pending[1:]
