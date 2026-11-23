@@ -2130,7 +2130,8 @@ def run_parallel(
             past it is stopped and each of its items run once more alone
             on a fresh worker, and an item past it again comes back as a
             `_TaskDidNotFinish` (yielded under `yield_exceptions`, raised
-            otherwise). On a shared `ProcessPoolExecutor` every worker is
+            otherwise). An item of a chunk of several is charged only with
+            its runs alone, so it is rejected at its second stop alone. On a shared `ProcessPoolExecutor` every worker is
             sent SIGKILL when the reader has waited on one result for
             longer, and the stream fails with `_RanPastTheBound`, a
             `BrokenProcessPool`. Not applied to threads, which cannot be
