@@ -439,7 +439,9 @@ def resolve_task_timeout() -> Optional[float]:
 
 class _TaskDidNotFinish(Exception):
     """A task that ran past the time bound twice, the second time alone on a
-    fresh worker process, which was then stopped (#673).
+    fresh worker process, which was then stopped (#673). A task of a chunk
+    of several is charged only with its runs alone, so it was stopped three
+    times: once in its chunk, then twice alone.
 
     Made in the parent, never pickled. Yielded in the task's place under
     `yield_exceptions`, raised otherwise.
@@ -452,9 +454,8 @@ class _TaskDidNotFinish(Exception):
     def __init__(self, item, bound):
         super().__init__(
             f"the task did not finish within the {bound:g} s bound "
-            f"(ISOCENTER_TASK_TIMEOUT), and run again alone on a fresh "
-            f"worker process it did not finish within it a second time; "
-            f"both workers were stopped")
+            f"(ISOCENTER_TASK_TIMEOUT) twice, the second time alone on a "
+            f"fresh worker process; each worker it ran on was stopped")
         self.item = item
         self.bound = bound
 
@@ -1253,10 +1254,13 @@ class _SlotPool:
         task_timeout (Optional[float]): Seconds one chunk may run (#673).
             A chunk past it has its worker sent SIGKILL; the other chunk
             that worker held is run again, and each item of the stopped
-            chunk is run once more, alone, on a fresh worker. An item past
-            the bound a second time comes back as `_TaskDidNotFinish`: as
-            a value under `yield_exceptions`, raised otherwise. None: no
-            bound.
+            chunk is run once more, alone, on a fresh worker (at most
+            `width` such workers at once). An item past the bound a second
+            time comes back as `_TaskDidNotFinish`: as a value under
+            `yield_exceptions`, raised otherwise. Only an item that was a
+            chunk of its own is charged with its chunk's stop; an item of
+            a chunk of several is charged with its runs alone only. None:
+            no bound.
 
     Raises:
         ValueError: `width` or `depth` below 1, or `recycle_after` neither
@@ -1314,6 +1318,14 @@ class _SlotPool:
         self._again = collections.deque()
         self._confirm = collections.deque()
         self._pieces = {}
+        # The stops each item run alone has been charged with, keyed by its
+        # piece sequence. A chunk of one item that was stopped charges that
+        # item 1: it was running. A chunk of several charges none of them:
+        # which one was running cannot be read in the parent, and the items
+        # behind it never started, so a stop alone is then an item's first
+        # (owner ruling Q8; found in the review of #673). Only a stop that
+        # brings an item to 2 rejects it.
+        self._strikes = {}
         self._yields_values = False
 
     def _started(self, process):
@@ -1388,11 +1400,18 @@ class _SlotPool:
         used up. Returns `[slot]` for the slot whose worker refused a
         chunk, or `[]`."""
         while True:
-            if self._confirm:
+            if self._confirm and sum(
+                    1 for s in self._live if s.alone) < self._width:
                 # An item to run again alone goes first, each on a worker of
-                # its own that is given nothing else (owner ruling Q8). Not
-                # counted in the width: with `recycle_after` None no worker
-                # ever frees a place, and the item would wait for good.
+                # its own that is given nothing else (owner ruling Q8). These
+                # workers have a width of their own, the pool's: not the
+                # regular one, because with `recycle_after` None no regular
+                # worker ever frees a place and the item would wait for
+                # good; and not none, because a stopped chunk of C items
+                # would then spawn C interpreters at once (a storage stall
+                # under ISOCENTER_CHUNKSIZE spawned one per item; review of
+                # #673). So at most twice the width are live, beside the
+                # workers told to leave.
                 piece = self._confirm.popleft()
                 slot = self._open(alone=True)
                 if not self._submit(slot, piece):
@@ -1748,6 +1767,7 @@ class _SlotPool:
         slot.inflight.clear()
         slot.submitted.clear()
         again = []
+        first_alone = False
         for future, chunk in held:
             if future.done() and not isinstance(future.exception(),
                                                 BrokenProcessPool):
@@ -1757,6 +1777,14 @@ class _SlotPool:
             elif future is not head:
                 again.append(chunk)
             elif slot.alone:
+                strikes = self._strikes.pop(chunk[0], 0) + 1
+                if strikes < 2:
+                    # Its first stop of its own: it may never have started
+                    # in the chunk that was stopped. Once more, alone.
+                    first_alone = True
+                    self._strikes[chunk[0]] = strikes
+                    self._confirm.append(chunk)
+                    continue
                 item = chunk[2][0]
                 marker = _TaskDidNotFinish(item, self._bound)
                 self._deliver(chunk[0],
@@ -1766,9 +1794,11 @@ class _SlotPool:
                 sequence, start, items = chunk
                 self._pieces[sequence] = {"results": [None] * len(items),
                                           "left": len(items)}
+                charged = 1 if len(items) == 1 else 0
                 for index, item in enumerate(items):
-                    self._confirm.append(
-                        (("piece", sequence, index), start + index, [item]))
+                    piece = ("piece", sequence, index)
+                    self._strikes[piece] = charged
+                    self._confirm.append((piece, start + index, [item]))
         self._again.extendleft(reversed(again))
         try:
             # After the kill, so the manager thread has no live worker to
@@ -1779,7 +1809,18 @@ class _SlotPool:
         pids = ", ".join(str(pid) for pid in killed) or "unknown"
         # Neither "after the pool was told to stop" nor "had finished their
         # tasks": tests count the two exit lines by those words.
-        if slot.alone:
+        if first_alone:
+            # An item of a stopped chunk of several, run alone: the chunk's
+            # stop was charged to none of its items, so this is its first.
+            get_logger().warning(
+                "A task ran for %.1f s, past the %g s bound "
+                "(ISOCENTER_TASK_TIMEOUT), alone on a fresh worker process, "
+                "after the chunk of several it was in had been stopped; that "
+                "worker was sent SIGKILL (pid %s), and the task is run once "
+                "more, alone, on another fresh worker process before it is "
+                "reported (#673).",
+                ran, self._bound, pids)
+        elif slot.alone:
             get_logger().warning(
                 "A task ran for %.1f s, past the %g s bound "
                 "(ISOCENTER_TASK_TIMEOUT), a second time, alone on a fresh "
