@@ -229,7 +229,11 @@ def test_a_waveform_item_with_no_bits_allocated_is_written_and_named(tmp_path):
         "reader interprets those bytes."]
 
 
-def test_a_zero_length_waveform_bits_allocated_keeps_the_signal(tmp_path):
+@pytest.mark.parametrize("syntax", [ExplicitVRLittleEndian,
+                                    ImplicitVRLittleEndian],
+                         ids=["explicit", "implicit"])
+def test_a_zero_length_waveform_bits_allocated_keeps_the_signal(tmp_path,
+                                                                syntax):
     """Waveform Bits Allocated is there with no value, and pydicom's
     resolver cannot compare it with 8 (`None > 8`, a `TypeError`). That is
     the decider failing, as for LUT Data beside a short descriptor (#703),
@@ -241,7 +245,7 @@ def test_a_zero_length_waveform_bits_allocated_keeps_the_signal(tmp_path):
     sibling first, and the two take the no-sibling arm."""
     ds = _waveform(_dataset(), declare_bits=False, minmax=False, padding=True)
     ds.WaveformSequence[0].add_new(0x54001004, "US", None)
-    written, db = _export(tmp_path, ds, compress=True)
+    written, db = _export(tmp_path, ds, syntax=syntax, compress=True)
     assert _element(written, WAVEFORM_PATH, WAVEFORM_DATA) == (
         "OW", b"\x00\x00\x32\x00\xce\xff\x64\x00")
     assert _element(written, WAVEFORM_PATH, WAVEFORM_PADDING) == (

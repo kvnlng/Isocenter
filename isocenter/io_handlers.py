@@ -2549,9 +2549,10 @@ def _read_element(ds, tag, little_endian=True):
     # `AttributeError` that is an inference: it raised, so neither the
     # item nor any ancestor that propagated a `_pixel_rep` into it
     # declares Pixel Representation. Its `TypeError` (#703) says nothing
-    # about Pixel Representation, and needs nothing said: it is raised
-    # only for LUT Data, whose arm reads the descriptor and never the
-    # representation, and a LUT's descriptor is in the LUT's own item.
+    # about Pixel Representation, and needs nothing said: it is taken
+    # for unresolved only for LUT Data and the `OB or OW` waveform tags
+    # (#972), whose arms read the descriptor or Waveform Bits Allocated
+    # off the element's own item and never the representation.
     # The inference holds only because every item carries the
     # `_pixel_rep` its ancestors imply: pydicom stamps it when it reads an
     # `SQ`, and `populate_attrs` stamps the items `_sequence_from_un_bytes`
