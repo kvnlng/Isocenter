@@ -166,10 +166,10 @@ def test_a_source_already_labelled_for_the_transform_is_transformed(
     J2K source whose samples this library already inverse-transformed
     into memory (`jpeg2k_decode` undoes the transform, #448), so applying
     the transform on re-encode is what makes the label true of *this*
-    codestream. The label is not rewritten: `YBR_ICT` stays `YBR_ICT`
-    rather than becoming `YBR_RCT`, because relabelling would name a
-    transform this function did not choose, and relabelling to `RGB`
-    would discard the source's stated colour space against #482.
+    codestream. Both are written `YBR_RCT` since #1080: `level=0` is the
+    reversible transform, and `YBR_ICT` names the irreversible one, so
+    keeping it named the wrong transform. Relabelling to `RGB` would
+    discard the source's stated colour space against #482.
 
     Mutant: `_J2K_MCT_SOURCES` narrowed back to `{"RGB"}`, or the
     relabel's `photometric == "RGB"` guard dropped. The first goes red at
@@ -178,7 +178,7 @@ def test_a_source_already_labelled_for_the_transform_is_transformed(
     ds, arr = _dataset(photometric, 3)
     _compress_j2k(ds, pixel_array=arr)
     assert _cod_transform(_frame(ds)) == 1
-    assert str(ds.PhotometricInterpretation) == photometric
+    assert str(ds.PhotometricInterpretation) == "YBR_RCT"
     assert ds.file_meta.TransferSyntaxUID == JPEG2000Lossless
 
 

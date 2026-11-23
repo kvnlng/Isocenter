@@ -300,7 +300,7 @@ def test_an_oddly_spelled_admitted_label_is_not_the_label_checks_refusal(
 
 
 @pytest.mark.parametrize("declared, expected", [
-    ("RGB", "YBR_RCT"), ("YBR_ICT", "YBR_ICT"), ("YBR_RCT", "YBR_RCT"),
+    ("RGB", "YBR_RCT"), ("YBR_ICT", "YBR_RCT"), ("YBR_RCT", "YBR_RCT"),
     ("YBR_FULL", "YBR_FULL")])
 def test_a_compressed_colour_export_passes_whatever_516_labelled_it(
         tmp_path, declared, expected):
@@ -308,8 +308,8 @@ def test_a_compressed_colour_export_passes_whatever_516_labelled_it(
 
     `_compress_j2k` has three cases and all of them end here: an `RGB`
     source is transformed and **relabelled** `YBR_RCT` (case 1), a
-    source already `YBR_RCT`/`YBR_ICT` is transformed and keeps its
-    label (case 2, the owner's #490 ruling), and every other 3-sample
+    source already `YBR_RCT`/`YBR_ICT` is transformed and written
+    `YBR_RCT` (case 2; `YBR_ICT` kept its label until #1080), and every other 3-sample
     source is encoded with `mct=False` and keeps its label (case 3). The
     readback is the only reader that sees the label after that relabel:
     `_write_pixel_geometry` runs before the encoder, so the writer
@@ -321,8 +321,7 @@ def test_a_compressed_colour_export_passes_whatever_516_labelled_it(
     the colour space fails cases 2 and 3, where the label is the
     source's and the samples were never transformed on the way in.
     Killing mutations: either of those two comparisons in place of the
-    structural one; the J2K row narrowed to `YBR_RCT` alone (case 2's
-    `YBR_ICT` fails).
+    structural one. The J2K row admits `YBR_RCT` alone since #1080.
     """
     outcome = _export(tmp_path, _image(declared), compression="j2k",
                       verify_readback=True)

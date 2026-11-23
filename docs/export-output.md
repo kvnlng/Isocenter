@@ -32,7 +32,7 @@ The export writes two transfer syntaxes and no others: JPEG 2000 Lossless (`1.2.
 
 Compression is lossless, but it changes how colour images are labelled:
 
-- An `RGB` image is encoded with JPEG 2000's reversible colour transform and declared `YBR_RCT`, as the standard requires. A YBR source that decodes to RGB is already stored as `RGB`.
+- An `RGB` image is encoded with JPEG 2000's reversible colour transform and declared `YBR_RCT`, as the standard requires. A YBR source that decodes to RGB is already stored as `RGB`. An image labelled `YBR_ICT` (the irreversible transform's name) is encoded with the reversible transform too, so it is declared `YBR_RCT`, and an INFO log note says so ([#1080](https://github.com/kvnlng/Isocenter/issues/1080)).
 - 32- and 64-bit integer images cannot be compressed exactly. JPEG 2000 Lossless here is exact only to 25 bits. Under `use_compression=True`, each such instance is written uncompressed, Explicit VR Little Endian, and the export names it at INFO, with no audit row. The samples are written exactly. Other instances of the same export are still compressed ([#771](https://github.com/kvnlng/Isocenter/issues/771)).
 - A 16-bit colour image is compressed too, and pydicom cannot read it with Pillow alone. With `pylibjpeg-openjpeg` installed, pydicom reads it exactly. The export names each such instance at INFO.
 

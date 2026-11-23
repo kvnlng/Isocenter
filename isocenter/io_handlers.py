@@ -447,13 +447,13 @@ class _PhotometricRefusal(RuntimeError):
 #: here is judged inadmissible: a label a syntax does not define is
 #: exactly what this is about.
 #:
-#: **One deliberate widening, because a strict table would fail this
-#: library's own output:** `YBR_ICT` is admitted under JPEG 2000
-#: *lossless* alongside `YBR_RCT`, though `level=0` is the reversible
-#: transform. A source already labelled `YBR_ICT`/`YBR_RCT` is encoded
-#: with the transform and keeps its label, so a table admitting only
-#: `YBR_RCT` would warn about, and refuse, files this exporter writes on
-#: purpose.
+#: JPEG 2000 *Lossless* admits `YBR_RCT` and not `YBR_ICT`: its
+#: codestream is reversible, and `YBR_ICT` names the irreversible
+#: transform (PS3.5 8.2.4). Since #1080 this exporter writes every frame
+#: it encodes with the transform as `YBR_RCT`, a `YBR_ICT` source
+#: included (`_j2k_written_label`), so the strict row no longer refuses
+#: its own output. Until then a `YBR_ICT` source kept its label over a
+#: reversible codestream, and this row admitted it.
 #:
 #: `YBR_PARTIAL_422`/`YBR_PARTIAL_420` are not admitted under JPEG 2000:
 #: the codestream holds full-sample components and PS3.5 A.4.4 gives no
@@ -479,8 +479,7 @@ _ADMISSIBLE_PHOTOMETRICS = {
     "1.2.840.10008.1.2": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.1": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.2": _PHOTOMETRIC_ANY_SYNTAX,
-    "1.2.840.10008.1.2.4.90": _PHOTOMETRIC_ANY_SYNTAX | {
-        "YBR_ICT", "YBR_RCT"},
+    "1.2.840.10008.1.2.4.90": _PHOTOMETRIC_ANY_SYNTAX | {"YBR_RCT"},
 }
 
 #: Why a label the written syntax does not admit is inadmissible, and
@@ -493,7 +492,18 @@ _ADMISSIBLE_PHOTOMETRICS = {
 #: name, and does nothing at all for the subsampled ones -- so a single
 #: shared sentence would be false for two of the four.
 _PHOTOMETRIC_INADMISSIBLE = {
+    # Two entries since #1080, one clause: compressing applies the
+    # reversible transform, which `YBR_RCT` names, so for `YBR_ICT` the
+    # remedy says the file is then labelled `YBR_RCT`, and for `YBR_RCT`
+    # it is true as it stood.
     "YBR_ICT": (
+        "these two labels name the irreversible and reversible "
+        "multiple-component transforms of a JPEG 2000 codestream, and "
+        "uncompressed pixel data has no codestream to carry one.",
+        "Export with use_compression=True, where the reversible transform "
+        "is applied and the file is labelled YBR_RCT, or declare the label "
+        "these bytes have with set_attr(\"0028,0004\", ...)."),
+    "YBR_RCT": (
         "these two labels name the irreversible and reversible "
         "multiple-component transforms of a JPEG 2000 codestream, and "
         "uncompressed pixel data has no codestream to carry one.",
@@ -511,7 +521,6 @@ _PHOTOMETRIC_INADMISSIBLE = {
         "Declare one of the labels the syntax admits with "
         "set_attr(\"0028,0004\", ...)."),
 }
-_PHOTOMETRIC_INADMISSIBLE["YBR_RCT"] = _PHOTOMETRIC_INADMISSIBLE["YBR_ICT"]
 _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_420"] = \
     _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_422"]
 
@@ -999,7 +1008,7 @@ def _pixel_less_label_warning(ds) -> Optional[str]:
     # no pixel data is written natively even under `compression="j2k"`
     # (`_compress_j2k` has nothing to encode and leaves `file_meta`
     # alone) while `written_syntax` says JPEG 2000, and the J2K row
-    # admits `YBR_ICT`.
+    # admits `YBR_RCT`.
     #
     # A multi-valued label is only warned about here because a pixel-less
     # file re-ingests carrying both values; the pixel arms refuse it
@@ -1078,7 +1087,7 @@ def _icon_label_warning(label, at) -> Optional[str]:
         Optional[str]: The WARNING sentence, or None when the label is
         admitted or absent.
     """
-    # Not the file's row: the J2K row admits `YBR_ICT`, and a `YBR_ICT`
+    # Not the file's row: the J2K row admits `YBR_RCT`, and a `YBR_RCT`
     # icon inside a `.90` file holds no codestream for the label to be
     # true of.
     found = _label_inadmissibility(label, _ICON_WRITTEN_SYNTAX)
@@ -7712,14 +7721,13 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # about either would name a label the file does not hold.
     #
     # One relabel is still ahead of this point and cannot be pulled
-    # behind it: under JPEG 2000, `_compress_j2k` turns an `RGB` source
-    # into `YBR_RCT`, and it runs after the whole
-    # geometry write. That is harmless *because both labels are on the
-    # J2K row* -- the judgement does not change -- and it is why the
-    # readback, not this function, is the reader that sees a compressed
-    # file's final label. A future encoder relabel to something
-    # off that row would make this check answer about a label the file
-    # no longer carries.
+    # behind it: under JPEG 2000, `_compress_j2k` writes an `RGB` or
+    # `YBR_ICT` source `YBR_RCT`, and it runs after the whole geometry
+    # write. So the judgement below asks `_j2k_written_label`, the
+    # encoder's own rule, for the label the file will carry (#1080):
+    # `YBR_ICT` is off the J2K row, and judged as declared it would be
+    # warned about under a label the file does not carry. The readback
+    # remains the reader that sees a compressed file's final label.
     #
     # Two outcomes. A label the syntax does not admit is
     # **written as declared** and handed back on `warnings`: there are
@@ -7748,9 +7756,15 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     if isinstance(written, (list, tuple, MultiValue)) and len(written) > 1:
         raise _multi_valued_refusal(written)
     if warnings is not None:
-        warning = _photometric_warning(
-            _written_photometric(ds.get("PhotometricInterpretation")),
-            syntax_uid, has_pixels=True, remedy=remedy)
+        # Judged as the file will carry it: under JPEG 2000 the encoder
+        # writes every transformed source `YBR_RCT` (`_j2k_written_label`,
+        # #1080), after this runs. Under any other syntax the label is
+        # written as it stands.
+        judged = _written_photometric(ds.get("PhotometricInterpretation"))
+        if str(syntax_uid) == str(JPEG2000Lossless):
+            judged = _j2k_written_label(judged, geom.samples)
+        warning = _photometric_warning(judged, syntax_uid, has_pixels=True,
+                                       remedy=remedy)
         if warning is not None:
             warnings.append(warning)
 
@@ -9633,8 +9647,15 @@ def _serialize_dicom(built: _Built, ctx: ExportContext, losses, corrections,
     # fallback, handing the batch's `"j2k"` on would send the frame to
     # the encoder, whose guard refuses it again. A float frame and a
     # pixel-less file keep the batch value, as before.
+    declared_label = ds.get("PhotometricInterpretation")
     ds = DicomExporter._finalize_dataset(
         ds, None if j2k_fallback else ctx.compression, pixel_array=arr)
+    # The encoder wrote a `YBR_ICT` source `YBR_RCT` (#1080). INFO on
+    # `corrections`, no row: the label is the exporter's name for the
+    # codestream it wrote, as a respelling is.
+    if (declared_label == "YBR_ICT"
+            and ds.get("PhotometricInterpretation") == "YBR_RCT"):
+        corrections.append(_YBR_ICT_RELABEL_NOTE)
 
     # A limit of ours, not a defect in the data: a
     # 16-bit or signed 8-bit YBR_FULL file is conformant and is
@@ -10031,12 +10052,13 @@ _PILLOW_J2K_NOTE = (
     "only Pillow, export with use_compression=False.")
 
 #: The 3-sample labels `_compress_j2k` encodes **with** the multiple
-#: component transform. `RGB` is transformed and relabelled
-#: `YBR_RCT`; `YBR_RCT` and `YBR_ICT` are transformed and keep the label
-#: they came with, because such an instance's samples were already
-#: inverse-transformed into memory by the decode that produced them, so
-#: applying the transform on re-encode is what makes the label true of
-#: the codestream. PS3.5 8.2.4 is symmetric about this: a transformed
+#: component transform, and every one is written `YBR_RCT`
+#: (`_j2k_written_label`): `level=0` is the reversible transform, and
+#: `YBR_RCT` is its name. `RGB` and `YBR_ICT` are relabelled (`YBR_ICT`
+#: since #1080, with an INFO note); `YBR_RCT` keeps its label. Such an
+#: instance's samples were already inverse-transformed into memory by the
+#: decode that produced them, so applying the transform on re-encode is
+#: what makes the label true of the codestream. PS3.5 8.2.4 is symmetric about this: a transformed
 #: codestream must carry one of these labels, and an untransformed one
 #: must carry components matching its Photometric Interpretation. Every
 #: other label -- `YBR_FULL`, `YBR_PARTIAL_420`, `YBR_PARTIAL_422`, and
@@ -10048,6 +10070,37 @@ _PILLOW_J2K_NOTE = (
 #: `_write_pixel_geometry` runs before the encoder; neither reaches this
 #: function under its own name. A direct caller can still pass either.
 _J2K_MCT_SOURCES = frozenset({"RGB", "YBR_RCT", "YBR_ICT"})
+
+
+def _j2k_written_label(photometric, samples):
+    """The label `_compress_j2k` writes for a declared label and sample count.
+
+    `YBR_RCT` for every 3-sample label it encodes with the transform
+    (`_J2K_MCT_SOURCES`); the declared label otherwise. One function, so
+    the encoder's relabel and the build half's label judgement
+    (`_write_pixel_geometry`, which runs before the encoder) answer about
+    the same label: judged as declared, a `YBR_ICT` source would be
+    warned about under JPEG 2000 for a label the file does not carry.
+
+    Args:
+        photometric (str): The declared label, as `ds` holds it.
+        samples (int): SamplesPerPixel.
+
+    Returns:
+        str: The label the compressed file carries.
+    """
+    if samples == 3 and photometric in _J2K_MCT_SOURCES:
+        return "YBR_RCT"
+    return photometric
+
+
+#: The INFO note for a `YBR_ICT` label the encoder writes `YBR_RCT`
+#: (#1080). A note, not a row: the label is the exporter's spelling of
+#: the codestream it writes (the #646 ruling), and no sample changes.
+_YBR_ICT_RELABEL_NOTE = (
+    "PhotometricInterpretation 'YBR_ICT' was written 'YBR_RCT': the JPEG "
+    "2000 codestream this export writes carries the reversible transform, "
+    "which YBR_RCT names.")
 
 
 def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
@@ -10187,15 +10240,15 @@ def _compress_j2k(ds, pixel_array=None):
     (encoded as `uint8`); see `_J2K_ENCODABLE_FRAMES`. 32- and 64-bit
     frames are refused before any encode.
 
-    A 3-sample `RGB` source is encoded with the multiple-component
-    transform and relabelled `YBR_RCT`; a 3-sample source already
-    labelled `YBR_RCT` or `YBR_ICT` is transformed and keeps its label;
+    A 3-sample `RGB`, `YBR_ICT` or `YBR_RCT` source is encoded with the
+    multiple-component transform and written `YBR_RCT`, the reversible
+    transform's name (`_j2k_written_label`; `YBR_ICT` since #1080);
     every other source is encoded without the transform and keeps its
     label (`_J2K_MCT_SOURCES`).
 
-    Updates `file_meta.TransferSyntaxUID`, `PixelData` and, for the `RGB`
-    case alone, `PhotometricInterpretation`; mutates nothing when it
-    refuses.
+    Updates `file_meta.TransferSyntaxUID`, `PixelData` and, for an `RGB`
+    or `YBR_ICT` source, `PhotometricInterpretation`; mutates nothing
+    when it refuses.
 
     Args:
         ds (pydicom.Dataset): the dataset to compress, in place.
@@ -10338,15 +10391,17 @@ def _compress_j2k(ds, pixel_array=None):
         #    MCT decorrelates RGB, so it earns its place here (`mct=0` /
         #    `mct=1` size ratios 1.105-2.195 across five sources).
         # 2. A source **already** labelled `YBR_RCT`/`YBR_ICT` is
-        #    transformed and **keeps its label**. Such an instance can
-        #    only have come from a J2K source whose samples this library
-        #    already inverse-transformed into memory, so applying the
-        #    transform on re-encode is what makes the label true of this
-        #    codestream. Encoding it `mct=False` under the label it keeps
-        #    would declare RCT over a `COD` transform byte of 0: the same
-        #    non-conformance, mirrored. Not relabelled to `RGB`, which
-        #    would discard the source's stated colour space, and not
-        #    refused, which no ingested file would reach.
+        #    transformed and written `YBR_RCT`. Such an instance's
+        #    samples were inverse-transformed into memory by the decode
+        #    that produced them (or given the label by hand), so applying
+        #    the transform on re-encode is what makes the label true of
+        #    this codestream. Encoding it `mct=False` under the label
+        #    would declare a transform over a `COD` transform byte of 0:
+        #    the same non-conformance, mirrored. `YBR_ICT` is relabelled
+        #    (#1080): it names the irreversible transform, and `level=0`
+        #    writes the reversible one. It kept its label until then, a
+        #    false name for this codestream. Not relabelled to `RGB`,
+        #    which would discard the source's stated colour space.
         # 3. **Every other label** -- `YBR_FULL`, `YBR_PARTIAL_420`,
         #    `YBR_PARTIAL_422`, and every 1-sample label including
         #    `PALETTE COLOR` -- is encoded `mct=False` and keeps its
@@ -10420,19 +10475,18 @@ def _compress_j2k(ds, pixel_array=None):
         # `is_little_endian` are not set alongside it, because pydicom
         # derives both from the UID and removes the attributes in 4.0.
         ds.file_meta.TransferSyntaxUID = JPEG2000Lossless
-        if mct and photometric == "RGB":
+        if mct:
             # The label for the transform the codestream now carries
-            # (case 1 above). Only the `RGB` source is relabelled: a
-            # source already labelled `YBR_RCT`/`YBR_ICT` (case 2) is
-            # transformed too, and its own label is already true of the
-            # codestream -- rewriting `YBR_ICT` to `YBR_RCT` would name the
-            # wrong transform for a label this function did not choose.
-            # Written here, after every frame encoded, so a refusal leaves
-            # `ds` saying `RGB` over the pixels it still has. Re-ingesting
-            # this file relabels it `RGB` again, because `jpeg2k_decode`
-            # undoes the transform and `DECODER_RELABELS` says so -- the
-            # round trip is stable in both directions.
-            ds.PhotometricInterpretation = "YBR_RCT"
+            # (cases 1 and 2 above): `YBR_RCT`, for an `RGB`, `YBR_ICT` or
+            # `YBR_RCT` source alike. Written here, after every frame
+            # encoded, so a refusal leaves `ds` saying what it said over
+            # the pixels it still has. Re-ingesting this file relabels it
+            # `RGB` again, because `jpeg2k_decode` undoes the transform and
+            # `DECODER_RELABELS` says so -- the round trip is stable in
+            # both directions. The `YBR_ICT` note is the caller's
+            # (`_serialize_dicom`), which holds `corrections`.
+            ds.PhotometricInterpretation = _j2k_written_label(
+                photometric, samples)
 
     except _J2kFrameRefusal:
         # Re-raised unchanged, ahead of the generic handler below. Wrapped
