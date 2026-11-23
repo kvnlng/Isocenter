@@ -106,7 +106,8 @@ from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
                        iter_item_tree, PhiStatus, _python_value,
-                       _one_tag_of)
+                       _one_tag_of, _holds_a_pixel_element,
+                       _pixels_are_elsewhere, pixels_elsewhere_words)
 from . import entities
 from .uids import generated_uid
 from .reversibility import ReversibilityService
@@ -5189,6 +5190,29 @@ _LINKAGE_KEY_NAMES = (
 )
 
 
+def _refuse_pixels_held_elsewhere(ds) -> None:
+    """Refuse an image whose pixels are held elsewhere (#1097).
+
+    A file with no pixel element (`entities._holds_a_pixel_element`) that
+    names a Pixel Data Provider URL at the top level or is under a JPIP
+    Referenced syntax (`entities._pixels_are_elsewhere`) holds an image
+    this library never sees. Ingested, it was exported with the URL as it
+    stood under PASS (the source UIDs a JPIP URL's query carries left
+    inside it, and no redaction zone reached the pixels it names), or,
+    under JPIP Referenced, failed every export. Owner ruling 2026-11-22,
+    Q13a.
+
+    Raises:
+        ValueError: `entities.pixels_elsewhere_words`, which never quotes
+            the URL.
+    """
+    if _holds_a_pixel_element(ds) or not _pixels_are_elsewhere(ds):
+        return
+    meta = getattr(ds, "file_meta", None) or {}
+    raise ValueError(pixels_elsewhere_words(
+        has_url=0x00287FE0 in ds, syntax=meta.get("TransferSyntaxUID")))
+
+
 def _refuse_a_multi_valued_key(ds) -> None:
     """Refuse a file one of whose linkage keys holds several values (#747).
 
@@ -5425,6 +5449,10 @@ def ingest_worker(fp: str) -> Tuple:
         # hand the parent an unhashable Patient ID or a list's text.
         _refuse_a_multi_valued_key(ds)
         _refuse_an_infinite_frame_count(ds)
+        # After the linkage-key refusals, so their rows speak first for a
+        # file both would refuse (#1097). Asked of the dataset alone, by
+        # presence: the read door's own two facts.
+        _refuse_pixels_held_elsewhere(ds)
         # After the SOP check: a generated study falls back to the SOP UID.
         meta.update(_linkage_keys(ds))
 
@@ -9141,6 +9169,17 @@ def _build_export_dataset(ctx: ExportContext, losses, corrections,
 
             # Otherwise (SR, etc.), proceed
             arr = None
+
+    # An instance with no pixels whose pixels are held elsewhere (#1097):
+    # ingest refuses such a file since 1.1, and an instance a 1.0.x ingest
+    # admitted fails here in the same sentence, never the URL, so a
+    # reopened store cannot export what ingest now refuses (owner ruling
+    # 2026-11-22, Q13b). After the read, never before: a pixel-bearing
+    # instance holding a URL keeps the URL's own handling below. In the
+    # build half, so a plugin's export fails the same way. The JPIP shape
+    # does not reach here: its read raises first, naming the syntax.
+    if arr is None and "0028,7fe0" in inst.attributes:
+        raise RuntimeError(pixels_elsewhere_words(has_url=True, syntax=None))
 
     # Resolve the geometry once, here, and use the same answer for the
     # redaction axes and the descriptors written below. It has to

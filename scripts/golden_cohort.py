@@ -1144,7 +1144,9 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
     Its pixels are on a server, not absent, so it is not written without
     them: its export fails with the same sentence, naming `JPIP
     Referenced`, as it did before #1093 (owner ruling of 2026-10-12).
-    It is here so that a change to that is seen."""
+    It is here so that a change to that is seen. Since #1097 it is
+    refused at ingest, in a sentence naming the syntax and never the
+    URL; its export no longer runs."""
     member = "no_pixels_under_an_undecodable_syntax"
     write(ct(member, study=1, pid=f"GOLD-{member}-good"),
           out / f"{member}-good.dcm")
@@ -1174,6 +1176,23 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
     del ds.PixelData
     ds.PixelDataProviderURL = "http://jpip.invalid/golden?target=GOLD-jpip"
     write(ds, out / f"{member}-jpip.dcm")
+
+
+def pixels_elsewhere(out: Path):
+    """An ordinary CT and a CT header of another patient with no pixel
+    element and a Pixel Data Provider URL `(0028,7FE0)`, under Explicit VR
+    Little Endian: the twin of `no_pixels_under_an_undecodable_syntax-jpip`
+    under a syntax pydicom decodes (#1097). It was ingested and exported
+    with the URL as it stood, graded PASS, the source's identifiers in the
+    URL's query. It is refused at ingest, in a sentence that names the
+    element and never quotes the URL."""
+    member = "pixels_elsewhere"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    ds = ct(member, study=2, pid=f"GOLD-{member}-url")
+    del ds.PixelData
+    ds.PixelDataProviderURL = "http://jpip.invalid/golden?target=GOLD-url"
+    write(ds, out / f"{member}-url.dcm")
 
 
 def private_vr_unlike_the_dictionary(out: Path):
@@ -1475,7 +1494,7 @@ MEMBERS = {f.__name__: f for f in (
     text_or_number_vr_on_a_binary_or_numeric_tag,
     decode_refusal_words, icon_label_samples,
     whole_codestreams, trailing_bytes, signed_bad_header,
-    icon_without_pixels)}
+    icon_without_pixels, pixels_elsewhere)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

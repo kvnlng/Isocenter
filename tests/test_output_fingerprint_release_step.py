@@ -240,6 +240,8 @@ COMMITTED = {
                        "one_bit_excess-good.dcm",
                        "one_bit_excess-no-frames-value.dcm",
                        "one_bit_excess-padded.dcm"],
+    "pixels_elsewhere": ["pixels_elsewhere-good.dcm",
+                         "pixels_elsewhere-url.dcm"],
     "prior_markers": ["prior_markers-1.dcm"],
     "private_creators": ["private_creators-1.dcm", "private_creators-2.dcm",
                          "private_creators-3.dcm"],

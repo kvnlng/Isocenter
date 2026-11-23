@@ -29,7 +29,7 @@ from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.sequence import Sequence
 from pydicom.uid import generate_uid
 
-from isocenter.io_handlers import ingest_worker
+from isocenter.io_handlers import ExportError, ingest_worker
 from isocenter.session import DicomSession
 
 SC = "1.2.840.10008.5.1.4.1.1.7"
@@ -139,9 +139,8 @@ def test_an_instance_already_in_a_store_fails_its_export(tmp_path):
         assert session.ingest(str(tmp_path / "src")).ingested == 1
         inst = session.store.patients[0].studies[0].series[0].instances[0]
         inst.set_attr("0028,7fe0", URL)
-        summary = session.export(str(tmp_path / "out"), show_progress=False)
-        assert summary.written == 0
-        assert len(summary.failures) == 1
+        with pytest.raises(ExportError):
+            session.export(str(tmp_path / "out"), show_progress=False)
     errors = [d for a, d in _rows(db) if a == "ERROR"]
     assert len(errors) == 1, errors
     assert URL_WORDS in errors[0], errors
