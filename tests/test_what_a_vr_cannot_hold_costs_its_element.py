@@ -30,7 +30,8 @@ output and records the loss in one row. Measured at `main` 3e4ee91a on
 - a list member holding a backslash was written as more values than the
   graph holds (#1014; owner ruling Q6: standard tags too);
 - `_resolve_one_ambiguous_vr` took every `TypeError` for "the decider
-  cannot decide" (#972, ruled 2026-10-07: LUT Data only);
+  cannot decide" (#972, ruled 2026-10-07: narrow it; the `US or SS` arm,
+  which converts the value, now re-raises);
 - `_python_value` scanned a plain list it had nothing to do for (#1004).
 
 Every row names the type and the VR, never the value. The helpers come
@@ -799,14 +800,15 @@ def test_a_private_tag_recorded_at_keeps_its_pair_as_a_list(tmp_path):
         "AT", b"\x00\x00\x18\x00\x00\x00\x63\x10")
 
 
-# -- T12: only LUT Data takes the unresolved arm on a TypeError ---------------
+# -- T12: the US-or-SS arm re-raises a TypeError; the deciders do not ----------
 
-def test_only_lut_data_takes_the_unresolved_arm_on_a_typeerror(monkeypatch):
+def test_the_us_or_ss_arm_re_raises_a_typeerror(monkeypatch):
     """#972, ruled 2026-10-07: narrow in v1.1. No live value reaches a
-    `TypeError` from pydicom's resolver outside LUT Data any more (the
-    exporter hands it Python numbers since #1009), so a patched resolver
-    is the only witness. Driven on a built `Dataset`: a monkeypatch does
-    not reach an export worker process."""
+    `TypeError` from pydicom's `US or SS` arm any more (the exporter
+    hands it Python numbers since #1009, and the numpy gate refuses the
+    rest first), so a patched resolver is the only witness. Driven on a
+    built `Dataset`: a monkeypatch does not reach an export worker
+    process. The waveform arm keeps the unresolved route (next test)."""
     def raising(elem, ds, little_endian, ancestors):
         raise TypeError("patched")
 

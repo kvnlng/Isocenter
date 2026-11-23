@@ -11828,23 +11828,30 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows,
         # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
         unresolved = True
     except TypeError:
-        # #703, and LUT Data's only (#972, ruled 2026-10-07: narrow in
-        # v1.1). The sibling is there and pydicom cannot subscript it --
-        # LUT Data beside a LUT Descriptor holding no value (None) or one
-        # (an int), the only arm of pydicom 3.0.2's resolver that
-        # subscripts. Its wrapper does not re-raise it, so until #703 it
-        # reached `_resolve_ambiguous_vrs`' `except Exception` and the
-        # table was dropped with a row in pydicom's words.
+        # #703 and #972 (ruled 2026-10-07: narrow in v1.1). Two arms of
+        # pydicom 3.0.2's resolver raise `TypeError` when the sibling
+        # they decide from is there and holds a value they cannot use:
+        # LUT Data's subscript of a LUT Descriptor holding no value (None)
+        # or one (an int), and the `OB or OW` waveform arm's
+        # `WaveformBitsAllocated > 8` against a zero-length (None) or
+        # text sibling. Both are "the decider cannot decide", so both are
+        # unresolved and take the arms below, as they did before #972.
+        # Its wrapper does not re-raise it, so until #703 it reached
+        # `_resolve_ambiguous_vrs`' `except Exception` and the element
+        # was dropped with a row in pydicom's words.
         #
-        # Any other element's `TypeError` is not "the decider cannot
-        # decide": it is a value pydicom could not convert (a
-        # `timedelta64` under `US or SS` was the one measured), and
-        # taking it for unresolved wrote that value under a VR it had
-        # never been asked about. So it is re-raised, and that same
+        # The other arm that can raise it is `US or SS`, which converts
+        # the value: there the `TypeError` is a value pydicom could not
+        # convert (a `timedelta64` was the one measured), and taking it
+        # for unresolved wrote that value under a VR it had never been
+        # asked about. So it is re-raised, and that same
         # `except Exception` makes it this element's row. Keyed on the
-        # tag, never on pydicom's message. Re-read
-        # `_correct_ambiguous_vr_element` on every pydicom bump.
-        if elem.tag != _LUT_DATA_TAG:
+        # tag, never on pydicom's message. A zero-length Waveform Bits
+        # Allocated reaches the waveform arm from a source file (X5
+        # review), which is why it is not narrowed to LUT Data alone.
+        # Re-read `_correct_ambiguous_vr_element` on every pydicom bump.
+        if (elem.tag != _LUT_DATA_TAG
+                and elem.tag not in _AMBIGUOUS_WAVEFORM_TAGS):
             raise
         unresolved = True
     if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
