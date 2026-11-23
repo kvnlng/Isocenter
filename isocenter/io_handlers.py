@@ -12517,12 +12517,15 @@ def _bytes_or_float_of(member):
     return bytes(member) if type(member) is bytearray else _float_of(member)
 
 
-def _one_tag(given, value):
+def _one_tag(given, value, *, private=False):
     """Under `AT`: `value`, or the 2-tuple `given` was when it names one tag.
 
     Args:
         given: The value as the graph holds it.
         value: `_export_value(given)`.
+        private: True for a private tag whose recorded VR is `AT`. There
+            any 2-tuple of two integers stays the tuple, with no 16-bit
+            bound, as before X5 (owner ruling Q5b; #1201).
 
     Returns:
         `tuple(value)` when `entities._one_tag_of(given)` names one tag:
@@ -12560,8 +12563,18 @@ def _one_tag(given, value):
     #   it always was: pydicom then raises inside `_merge`'s `try`.
     # - **Read from `value`**, so `(np.uint16(0x18), np.uint16(0x1063))`
     #   is the tag its twin is; pydicom refuses the numpy pair itself.
-    if type(given) is tuple and len(given) == 2 and type(value) is list and (
-            _one_tag_of(given) is not None
+    # - **A private tag recorded AT is not changed** (owner ruling Q5b,
+    #   filed as #1201; brief section 8 item 5). There every pair of two
+    #   integers stays the tuple, so the recorded-VR gate refuses it and
+    #   it is written as LO text under the re-VR row, as it always was.
+    #   The 16-bit bound is the standard arm's alone: shared, it wrote a
+    #   pair of full tags, or a pair with a half past 0xFFFF, under AT
+    #   with no row (X5 review).
+    if type(given) is not tuple or len(given) != 2 or type(value) is not list:
+        return value
+    if private and all(isinstance(part, int) for part in value):
+        return tuple(value)
+    if (_one_tag_of(given) is not None
             or all(isinstance(part, str) for part in value)):
         return tuple(value)
     return value
@@ -14108,7 +14121,7 @@ class DicomExporter:
                 if recorded == 'AT':
                     # One tag stays the 2-tuple it was, here too; the
                     # recorded-VR gate then refuses it as it always did.
-                    v = _one_tag(given, v)
+                    v = _one_tag(given, v, private=True)
                 if v is None or (isinstance(v, (list, tuple, MultiValue))
                                  and len(v) == 0):
                     # A zero-length element: the source asserted the
