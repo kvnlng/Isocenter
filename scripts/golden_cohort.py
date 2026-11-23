@@ -1082,6 +1082,28 @@ def signed_bad_header(out: Path):
     write(ds, out / f"{member}-bits-stored-17.dcm")
 
 
+def icon_without_pixels(out: Path):
+    """A CT whose three-sample 2x2 Icon Image Sequence item holds 5 bytes of
+    Pixel Data, where its descriptors need 12 (#1082). Ingest cannot hold
+    the icon's pixels; its row said `Standard tag 7fe0,0010 (OB) was not
+    ingested` and named no item, and the export wrote the item with its
+    descriptors and no Pixel Data, under PASS. The row now names the item
+    (`at 0088,0200[0]`), and the export leaves the item out with one
+    STANDARD `DATA_LOSS` row naming it. `label_spelling`'s two icon files
+    are the other inputs of this shape."""
+    member = "icon_without_pixels"
+    ds = ct(member, pid=f"GOLD-{member}")
+    icon = Dataset()
+    icon.Rows = icon.Columns = 2
+    icon.SamplesPerPixel, icon.PlanarConfiguration = 3, 0
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.PhotometricInterpretation = "RGB"
+    icon.add_new(0x7FE00010, "OB", bytes([1, 2, 3, 4, 5]))
+    ds.IconImageSequence = Sequence([icon])
+    write(ds, out / f"{member}.dcm")
+
+
 def fewer_fragments_than_frames(out: Path):
     """An ordinary CT and one JPEG 2000 Lossless file of another patient:
     two frames in two fragments under NumberOfFrames 3, an empty Basic
@@ -1452,7 +1474,8 @@ MEMBERS = {f.__name__: f for f in (
     declared_planar_configuration, number_vr_on_a_text_tag,
     text_or_number_vr_on_a_binary_or_numeric_tag,
     decode_refusal_words, icon_label_samples,
-    whole_codestreams, trailing_bytes, signed_bad_header)}
+    whole_codestreams, trailing_bytes, signed_bad_header,
+    icon_without_pixels)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

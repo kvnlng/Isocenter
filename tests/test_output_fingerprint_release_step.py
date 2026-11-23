@@ -181,6 +181,7 @@ COMMITTED = {
     "float_pixels": ["float_pixels-1.dcm"],
     "graphic_annotation": ["graphic_annotation-1.dcm"],
     "icon_label_samples": ["icon_label_samples.dcm"],
+    "icon_without_pixels": ["icon_without_pixels.dcm"],
     "implicit": ["implicit-1.dcm"],
     "label_spelling": ["label_spelling-icon-whitespace.dcm",
                        "label_spelling-icon.dcm",

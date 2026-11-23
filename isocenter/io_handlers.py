@@ -4328,8 +4328,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
     Args:
         ds (pydicom.Dataset): The enclosing dataset, for its `file_meta`.
         candidates (list): `(path, tag, vr, enclosing_ds)` tuples.
-        dropped (list): Appended to with `(tag, vr)` for every candidate
-            not carried, so the parent files its `DATA_LOSS` row.
+        dropped (list): Appended to with `(tag, vr, path)` for every
+            candidate not carried, so the parent files its `DATA_LOSS` row
+            naming the item (#1082). `populate_attrs`' own entries in the
+            same list are `(tag, vr)`.
         instance (Instance): The graph this walk just built, so a carried
             icon's descriptors can be corrected on its own item.
         offset_tables (list): Appended to with `(path, tag, vr, counted,
@@ -4380,7 +4382,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
     for path, tag_str, vr, item_ds in candidates:
         item_syntax = _nested_item_syntax(transfer_syntax, item_ds, tag_str)
         if item_syntax not in _CARRIABLE_TRANSFER_SYNTAXES:
-            dropped.append((tag_str, vr))
+            dropped.append((tag_str, vr, path))
             continue
 
         try:
@@ -4448,7 +4450,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # top-level arm takes -- an icon that will not decode is not a
             # reason to refuse the file, and the instance is otherwise
             # ingested as if the icon were not carried.
-            dropped.append((tag_str, vr))
+            dropped.append((tag_str, vr, path))
             continue
         finally:
             # The borrow is for the decode only. `ds` is walked again below
@@ -6674,7 +6676,7 @@ class DicomImporter:
                             # bare DicomStore and no sidecar.
                             meta.setdefault(
                                 'dropped_private_binary', []).append(
-                                    (n_tag, n_vr))
+                                    (n_tag, n_vr, n_path))
                             continue
                         # The frames `_decode_nested_pixels` dropped because
                         # the item's offset table named more than it
@@ -6792,7 +6794,13 @@ class DicomImporter:
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_STANDARD)
 
-                    for tag, vr in meta.get('dropped_private_binary', ()):
+                    for entry in meta.get('dropped_private_binary', ()):
+                        # `(tag, vr)` from `populate_attrs`; `(tag, vr,
+                        # path)` for a nested pixel element
+                        # `_decode_nested_pixels` did not carry, so the row
+                        # names the item it was in (#1082).
+                        tag, vr = entry[0], entry[1]
+                        at = entry[2] if len(entry) > 2 else None
                         scope = loss_scope_for_tag(tag)
                         # Two reason clauses, because two rules drop:
                         # group 7fe0 is excluded wholesale (unrouted pixel
@@ -6814,6 +6822,18 @@ class DicomImporter:
                                       f"ingested; {reason}, and it cannot "
                                       f"be exported even with "
                                       f"remove_private_tags=False.")
+                        elif at:
+                            # An Icon Image Sequence item without its
+                            # pixels is not exported at all
+                            # (`_drop_icons_without_pixels`), so the row
+                            # says the item goes; any other item stays,
+                            # without the element.
+                            gone = ("the item is" if at[-1][0] == ICON_IMAGE_SEQUENCE
+                                    else "it is")
+                            detail = (f"Standard tag {tag} ({vr}) at "
+                                      f"{_item_path_words(at)} was not "
+                                      f"ingested; {reason}, so {gone} not "
+                                      f"in the exported file.")
                         else:
                             detail = (f"Standard tag {tag} ({vr}) was not "
                                       f"ingested; {reason}, so it is "
@@ -8516,9 +8536,7 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
     # its own, and an interleaved loop would file a "gone" row while leaving
     # it in the file. Removal is then by object identity, not by recorded
     # index, because two identical icon `Dataset`s compare equal.
-    refs = getattr(inst, "_nested_pixel_refs", None)
-    if not refs:
-        return
+    refs = getattr(inst, "_nested_pixel_refs", None) or {}
 
     removals, writes = [], []
     for (path, terminal_tag), ref in refs.items():
@@ -8685,6 +8703,14 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             if judged is not None:
                 warnings.append(judged)
 
+    # Every icon item left holding no Pixel Data (#1082): its pixels were
+    # not ingested, so `_merge_sequences` wrote its descriptors alone.
+    # After the writes above, and before any removal, so the paths are
+    # the file's as built; an item already decided is not reported twice.
+    _drop_icons_without_pixels(
+        ds, removals, losses,
+        decided={id(item) for _parent, _tag, item in removals})
+
     for parent, seq_tag, item in removals:
         sequence = parent[seq_tag].value
         for index in range(len(sequence) - 1, -1, -1):
@@ -8697,6 +8723,50 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             # -- so absent is conformant and a zero-item sequence is just an
             # assertion about nothing.
             del parent[seq_tag]
+
+
+#: Icon Image Sequence, as a path step spells it.
+ICON_IMAGE_SEQUENCE = "0088,0200"
+
+
+def _drop_icons_without_pixels(ds, removals, losses, *, decided) -> None:
+    """Mark for removal every icon item holding no Pixel Data, with its row (#1082).
+
+    Walks `ds` at every depth. An Icon Image Sequence item with no
+    `(7FE0,0010)` is one whose pixels were not ingested (the decode
+    failed, or its syntax is not carried), and its descriptors without
+    pixels describe no image (PS3.3 C.7.6.1.1.6): the rule
+    `_write_back_nested_pixels` applies to every icon it cannot write.
+    Appends `(parent, seq_tag, item)` to `removals` and one STANDARD loss
+    per item. The graph is not changed.
+
+    Args:
+        ds (pydicom.Dataset): The dataset being built.
+        removals (list): Appended to, for the caller's removal by identity.
+        losses (list): Appended to with `(scope, detail)`.
+        decided (set): `id()` of items already marked for removal; neither
+            reported again nor walked into.
+    """
+    def walk(node, path):
+        for elem in list(node):
+            if elem.VR != "SQ" or elem.value is None:
+                continue
+            seq_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+            for index, item in enumerate(elem.value):
+                if id(item) in decided:
+                    continue
+                step = path + ((seq_tag, index),)
+                if seq_tag == ICON_IMAGE_SEQUENCE and "PixelData" not in item:
+                    removals.append((node, elem.tag, item))
+                    losses.append((LOSS_SCOPE_STANDARD, (
+                        f"Icon Image Sequence item at "
+                        f"{_item_path_words(step)} was not exported: it held "
+                        f"no Pixel Data, and an icon item's pixel descriptors "
+                        f"without its pixels describe no image (PS3.3 "
+                        f"C.7.6.1.1.6).")))
+                    continue
+                walk(item, step)
+    walk(ds, ())
 
 
 def _nested_loader_metadata(geometry, ref, inst) -> dict:
