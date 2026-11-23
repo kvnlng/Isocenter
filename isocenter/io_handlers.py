@@ -12798,7 +12798,7 @@ def _refuse_what_the_vr_cannot_hold(vr, value):
     # - **The writer's own question.** The integer and float families ask
     #   `struct.pack` with the format pydicom's writer uses, all atoms in
     #   one call, and walk the atoms only to name the refusal: a 65,536
-    #   entry LUT costs one pack. Not `_value_fits_vr`: it refuses `bool`,
+    #   entry plain list costs one pass over its types and one pack. Not `_value_fits_vr`: it refuses `bool`,
     #   every tuple, and reads AT as an integer VR, and this arm writes
     #   all three today.
     # - **A numpy value that is not a number** (#1000): `_export_value`
@@ -12835,10 +12835,16 @@ def _refuse_what_the_vr_cannot_hold(vr, value):
     if _is_zero_length(value):
         return
     atoms = value if isinstance(value, (list, MultiValue)) else (value,)
-    for atom in atoms:
-        if _is_a_numpy_leftover(atom):
-            raise TypeError(f"a {type(atom).__name__} is not a value {vr} "
-                            f"can hold")
+    # A plain list (a reopened store's LUT, say) holds no numpy value, and
+    # one C-level pass over its types says so: the per-member test cost
+    # about 7 ms on a 65,536-entry list. Only a fast path; the answer is
+    # the same without it.
+    if not (type(value) is list
+            and set(map(type, value)) <= entities._PLAIN_TYPES):
+        for atom in atoms:
+            if _is_a_numpy_leftover(atom):
+                raise TypeError(f"a {type(atom).__name__} is not a value "
+                                f"{vr} can hold")
     if vr in _BINARY_VRS:
         if not isinstance(value, (bytes, memoryview)):
             raise TypeError(f"a {type(value).__name__} is not bytes, and "
