@@ -168,6 +168,22 @@ def _die_or_wedge_reading(flag):
     _wedge_reading("WEDGE", flag=flag)
 
 
+def _wedge_or_slow_reading(log, seconds):
+    """Pool initializer: a path containing `WEDGE` never returns, and one
+    containing `SLOW` takes `seconds` and is appended to `log` as its read
+    begins, so a test can see which file was read more than once."""
+    _wedge_reading("WEDGE")
+    wedged = pydicom.dcmread
+
+    def dcmread(fp, *args, **kwargs):
+        if "SLOW" in str(fp):
+            with open(log, "a", encoding="utf-8") as handle:
+                handle.write(f"{fp}\n")
+            time.sleep(seconds)
+        return wedged(fp, *args, **kwargs)
+    pydicom.dcmread = dcmread
+
+
 def _wedge_twice_then_poison(strikes):
     """Pool initializer: a path containing `WEDGE` never returns on its first
     two reads across processes (each writes a file under `strikes` as it
@@ -716,19 +732,30 @@ def test_a_peer_ingest_on_the_stopped_pool_loses_no_file(tmp_path,
                                                          monkeypatch):
     """Two `ingest()` calls on one session share its pool. One holds a file
     that never finishes reading; the watcher stops the pool under both. The
-    peer reads its own files again on its own rounds and loses none.
+    peer was still reading when the pool was stopped: its 20 files take 1 s
+    each, and one worker is held by the wedged file, so the peer still had
+    files to read when the stop came at the bound (12 files left 2 under
+    the killing mutation, too thin a margin). It reads its own files again
+    on its own rounds and loses none.
+
+    Precondition: a peer file was read twice, so the stop reached the peer
+    mid-read (without it the test passed with the peer already finished,
+    under its own killing mutation; review of #673).
 
     Killing mutation: a peer's broken round read as the end of its files.
     """
     monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
     monkeypatch.setenv("ISOCENTER_TASK_TIMEOUT", str(BOUND))
-    _wedge_pools(monkeypatch, functools.partial(_wedge_reading, "WEDGE"))
+    log = str(tmp_path / "reads.log")
+    _wedge_pools(monkeypatch,
+                 functools.partial(_wedge_or_slow_reading, log, 1.0))
     wedged_dir = tmp_path / "a"
     healthy_dir = tmp_path / "b"
     wedged_dir.mkdir()
     healthy_dir.mkdir()
     src, paths = _folder(wedged_dir, 4, {1: "WEDGE"})
-    peer_src, _ = _folder(healthy_dir, 12, {})
+    peer_src, peer_paths = _folder(healthy_dir, 20,
+                                   {i: "SLOW" for i in range(20)})
     with DicomSession(str(tmp_path / "s.db")) as session:
         results = {}
 
@@ -744,9 +771,14 @@ def test_a_peer_ingest_on_the_stopped_pool_loses_no_file(tmp_path,
         for thread in threads:
             thread.join(240)
         assert not any(t.is_alive() for t in threads), "an ingest hung"
-    assert [p for p, _ in results["wedged"].failures] == [paths[1]]
-    assert results["peer"].ingested == 12
+    assert results["peer"].ingested == 20, results["peer"]
     assert not results["peer"].failures
+    assert [p for p, _ in results["wedged"].failures] == [paths[1]]
+    with open(log, encoding="utf-8") as handle:
+        reads = [line.strip() for line in handle]
+    assert set(reads) == set(peer_paths), reads
+    assert len(reads) > len(set(reads)), (
+        "the premise: the stop reached the peer while it was reading", reads)
 
 
 _CTRL_C_SCRIPT = textwrap.dedent("""
