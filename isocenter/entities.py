@@ -1006,7 +1006,7 @@ _JPIP_NAMES = {
     "1.2.840.10008.1.2.4.205": "JPIP HTJ2K Referenced Deflate"}
 
 
-def pixels_elsewhere_words(*, has_url: bool, syntax) -> str:
+def pixels_elsewhere_words(*, has_url: bool, syntax: Optional[str]) -> str:
     """The refusal for an image whose pixels are held elsewhere (#1097).
 
     One sentence for ingest's refusal and the export's: ingest refuses a
@@ -1020,7 +1020,7 @@ def pixels_elsewhere_words(*, has_url: bool, syntax) -> str:
 
     Args:
         has_url (bool): Whether (0028,7FE0) is present at the top level.
-        syntax: The transfer syntax UID, or None.
+        syntax (Optional[str]): The transfer syntax UID, or None.
 
     Returns:
         str: The sentence.

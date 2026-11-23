@@ -54,8 +54,8 @@ does not walk at all: it joins every fragment into one frame. Where each
 fragment is a whole stream of a marker-delimited syntax (start marker to
 end marker), `_whole_stream_fragments` counts the fragments as frames,
 and the decode is told that count too (#1088). A native 1-bit frame
-that is not a whole number of bytes is counted in bits (`_native_excess`,
-#1094).
+that is not a whole number of bytes is counted in bits (#1094,
+`_native_excess`).
 
 **Limits.** NumberOfFrames 1, or absent, over several fragments with no
 table, where the fragments are not each a whole stream: the frames are
