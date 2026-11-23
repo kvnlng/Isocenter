@@ -14,6 +14,7 @@ Each variable's name, default and documented behaviour are part of the 1.0 freez
 | **`ISOCENTER_MAX_WORKERS`** | `os.cpu_count()` | How many workers a parallel pass uses. `redact()` has its own default. |
 | **`ISOCENTER_CHUNKSIZE`** | `1` | How many items each worker task carries. |
 | **`ISOCENTER_MAX_TASKS_PER_CHILD`** | *Unlimited* | Recycle each worker process after N tasks. It always means processes. |
+| **`ISOCENTER_TASK_TIMEOUT`** | `600` | Seconds one file of `ingest()` or one instance of `export()` may take. A file or instance that takes longer twice, the second time alone on a new worker, is not read or written, and an `ERROR` row names it. `0` means no limit. |
 | **`ISOCENTER_DISABLE_GC`** | `0` | `1` disables garbage collection in worker processes. |
 | **`ISOCENTER_FORCE_THREADS`** | `0` | `1` runs `audit()`, `scan_pixel_content()` and `redact()` in threads. |
 | **`ISOCENTER_FORCE_PROCESSES`** | `0` | `1` runs in processes on a free-threaded build too. |
@@ -87,6 +88,22 @@ Restart worker processes after N tasks to release memory. This is useful if you 
 - **`redact()` on a `:memory:` store refuses it.** That store's redaction asks for threads, and this variable would override that request. Instead, `redact()` raises `RuntimeError`. The message names the store and this variable. It also says why processes cannot work for an in-memory database, and gives two remedies: unset the variable, or use a file-backed store. `redact()` raises before any work starts, so nothing has happened when the error arrives. `except RedactionError` does not catch the refusal. `except RuntimeError` does.
 - **It cannot reach `session.export()` in either direction.** An export always recycles each worker after 25 tasks, so neither raising nor lowering this changes what an export does.
 - **Nor does it reach `ingest()`.** `ingest()` runs on the session's own process pool, which never recycles a worker. That pool is rebuilt when `ISOCENTER_MAX_WORKERS` changes, and never for this variable. Each `ingest()` that has files to read logs one `WARNING`. The warning says that the variable had no effect on that `ingest()` and that its result is unaffected. When `ISOCENTER_FORCE_THREADS` is also set, the warning is one line that names both variables. An `ingest()` with nothing new to read is silent.
+
+## `ISOCENTER_TASK_TIMEOUT`
+
+**Default:** `600` (seconds).
+
+**Floor:** 0. `0` means no limit: a call waits for each file or instance for as long as it takes, as before 1.1. A **negative** value, or a value that is not a whole number, is not a limit. Isocenter reports it with a warning that names the variable and the value, and uses the default of `600` instead.
+
+The time limit on one task of `ingest()` and of `export()` (#673). A task is one file that `ingest()` reads, or one instance that `export()` writes (more than one when `ISOCENTER_CHUNKSIZE` is set). Without a limit, a file that a decoder cannot finish (an endless loop, for example) stopped the whole call: the call did not return, nothing was saved, and no row named the file.
+
+- **Each call reads the variable once,** when it starts. Every task of that call, and every row it writes, uses the same limit.
+- **A task is stopped twice before it is rejected.** When a task takes longer than the limit, Isocenter sends `SIGKILL` to the worker process that runs it, and a `WARNING` log line says so. Then the task runs again, alone, on a new worker process. Only when it takes longer than the limit a second time is the file or instance rejected. So a file that never finishes costs at least twice the limit before the call goes on. A file that was slow only once (for example, on a machine under heavy load) is read or written as usual, and no row is written for it.
+- **What a rejected file gives.** For `ingest()`: one `ERROR` row that names the file's path and the limit, and the file in `IngestSummary.failures`. For `export()`: one `ERROR` row that names the instance's SOP Instance UID and the limit, the instance in `ExportSummary.failures`, and no file under its name. A worker that was stopped can leave one `.tmp` file in the output folder, as a worker that ends for any other reason can. The `ERROR` row grades the run `REVIEW_REQUIRED` ([condition 2](analytics.md)).
+- **In `export()`, the time is measured on the worker.** It starts when the worker starts the task. For the first task of a new worker, it includes the time the worker takes to start, which imports numpy and pydicom and can take some seconds on a machine under load. So a limit of a few seconds can reject an instance that is not slow. Keep the limit well above the time that your slowest instance takes.
+- **In `ingest()`, the time is measured in the calling process.** `ingest()` uses the session's process pool, which other `ingest()` calls on the same session can also use, so the time that one file takes cannot be measured there. Isocenter measures how long `ingest()` waits for the next file. When that wait is longer than the limit, Isocenter sends `SIGKILL` to every worker process of the session's pool, writes no row, and reads each file that was not returned again, one at a time, on a new worker. There, one worker reads one file, and the time is exact. Another `ingest()` on the same session that was using the pool reads its files again in the same way, and loses none. The next `ingest()` gets a new pool.
+- **It does not reach threads.** A thread cannot be stopped. `ingest()` and `export()` always run in processes, on a free-threaded build too.
+- **It does not reach the other calls.** `audit()`, `redact()`, `scan_pixel_content()`, `discover_redaction_zones()`, `DicomExporter.write_tree()` and the `wfdb` format (which writes its records in the calling process) have no limit.
 
 ## `ISOCENTER_DISABLE_GC`
 
