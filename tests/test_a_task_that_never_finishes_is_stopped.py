@@ -93,6 +93,24 @@ def _wedge_once_at(args):
     return value
 
 
+def _wedge_at_and_once_at(args):
+    """`wedge` never returns. Each value in `once` never returns the first
+    time it runs, across processes (a marker file under `markers` is written
+    as it wedges), and returns on any later run."""
+    value, wedge, once, markers = args
+    if value == wedge:
+        while True:
+            time.sleep(3600)
+    if value in once:
+        marker = os.path.join(markers, str(value))
+        if not os.path.exists(marker):
+            with open(marker, "w", encoding="utf-8"):
+                pass
+            while True:
+                time.sleep(3600)
+    return value
+
+
 def _sleep_then_return(args):
     value, seconds = args
     time.sleep(seconds)
@@ -353,6 +371,80 @@ def test_a_chunk_of_several_items_is_confirmed_one_item_at_a_time(
         assert values[:4] == [0, 1, 2, 3] and values[5:] == [5, 6, 7, 8], \
             values
         assert isinstance(values[4], parallel._TaskDidNotFinish), values
+    assert _gone(recorded_pools)
+
+
+def test_a_chunk_mate_that_never_started_is_not_rejected_at_its_first_stop(
+        tmp_path, recorded_pools):
+    """Chunks of 3: item 4 never returns, and item 5, behind it in its
+    chunk, never started there. Run alone, item 5 is slow on that run only.
+    That run alone is item 5's first run past the bound, so it is run once
+    more, returns, and is not reported (owner ruling Q8). Only item 4, which
+    never returns, is reported. Which item of a chunk was running when the
+    chunk was stopped cannot be read in the parent, so the chunk's stop is
+    charged to none of its items.
+
+    Killing mutation: an item of a stopped chunk of several reported at its
+    first stop alone (found in the review of #673).
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    items = [(value, 4, (5,), str(markers)) for value in range(9)]
+    outcome = _run_bounded(lambda: parallel.run_parallel(
+        _wedge_at_and_once_at, items, max_workers=2, maxtasksperchild=25,
+        chunksize=3, show_progress=False, yield_exceptions=True,
+        task_timeout=BOUND), 180)
+
+    assert not outcome["hung"]
+    assert "error" not in outcome, outcome
+    values = outcome["value"]
+    assert os.listdir(markers) == ["5"], "item 5 never ran alone"
+    assert [v.item[0] for v in values
+            if isinstance(v, BaseException)] == [4], values
+    assert sorted(v for v in values if not isinstance(v, BaseException)) == [
+        0, 1, 2, 3, 5, 6, 7, 8]
+    assert _gone(recorded_pools)
+
+
+def test_the_items_run_alone_are_bounded_by_the_width(tmp_path,
+                                                      recorded_pools,
+                                                      monkeypatch):
+    """Two workers, chunks of 4, and the first item of each chunk is slow
+    on its first run only: both chunks are stopped, and their 8 items are
+    run alone. At most `width` of those run at once, so the pool never holds
+    more than twice the width of live workers (a storage stall under
+    `ISOCENTER_CHUNKSIZE` must not spawn one interpreter per item). Every
+    item comes back.
+
+    Killing mutation: each item run alone opened on a worker of its own at
+    once, whatever the width (16 items in chunks of 8 at width 2 spawned 17
+    processes, found in the review of #673).
+    """
+    peak = {"alone": 0, "live": 0}
+    real_open = parallel._SlotPool._open
+
+    def counting_open(self, alone=False):
+        slot = real_open(self, alone=alone)
+        peak["alone"] = max(peak["alone"],
+                            sum(1 for s in self._live if s.alone))
+        peak["live"] = max(peak["live"], len(self._live))
+        return slot
+
+    monkeypatch.setattr(parallel._SlotPool, "_open", counting_open)
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    items = [(value, None, (0, 4), str(markers)) for value in range(8)]
+    outcome = _run_bounded(lambda: parallel.run_parallel(
+        _wedge_at_and_once_at, items, max_workers=2, maxtasksperchild=25,
+        chunksize=4, show_progress=False, yield_exceptions=True,
+        task_timeout=BOUND), 180)
+
+    assert not outcome["hung"]
+    assert "error" not in outcome, outcome
+    assert sorted(outcome["value"]) == list(range(8)), outcome["value"]
+    assert sorted(os.listdir(markers)) == ["0", "4"]
+    assert peak["alone"] <= 2, peak
+    assert peak["live"] <= 4, peak
     assert _gone(recorded_pools)
 
 
