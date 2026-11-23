@@ -25,6 +25,7 @@ pydicom, which this machine has been measured to take seconds under load;
 the assertions hold even when a healthy task is stopped once by mistake,
 because a mistaken first stop costs nothing by design.
 """
+import concurrent.futures
 import functools
 import logging
 import multiprocessing
@@ -36,6 +37,7 @@ import sys
 import textwrap
 import threading
 import time
+from concurrent.futures.process import BrokenProcessPool
 
 import pydicom
 import pytest
@@ -96,6 +98,20 @@ def _sleep_then_return(args):
     return value
 
 
+def _wedge_once_then_die_at(args):
+    """`_wedge_once_at`, except that the later run of the wedged item ends
+    its worker instead of returning."""
+    value, wedge, marker = args
+    if value == wedge:
+        if not os.path.exists(marker):
+            with open(marker, "w", encoding="utf-8"):
+                pass
+            while True:
+                time.sleep(3600)
+        os._exit(7)  # pylint: disable=protected-access
+    return value
+
+
 def _wedge_reading(marker, once_marker=None, flag=None):
     """Pool initializer: reading a path containing `marker` never returns.
 
@@ -130,6 +146,35 @@ def _die_or_wedge_reading(flag):
         _die_reading)
     _die_reading("POISON", "exit")
     _wedge_reading("WEDGE", flag=flag)
+
+
+def _wedge_twice_then_poison(strikes):
+    """Pool initializer: a path containing `WEDGE` never returns on its first
+    two reads across processes (each writes a file under `strikes` as it
+    wedges) and returns on the third; one containing `POISON` ends the
+    worker, but only once the first strike is written, so the first round
+    has begun reading the wedged file before the pool breaks."""
+    real = pydicom.dcmread
+
+    def dcmread(fp, *args, **kwargs):
+        if "WEDGE" in str(fp):
+            for strike in ("1", "2"):
+                try:
+                    fd = os.open(os.path.join(strikes, strike),
+                                 os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    continue
+                os.close(fd)
+                while True:
+                    time.sleep(3600)
+        if "POISON" in str(fp):
+            deadline = time.monotonic() + 60
+            while (not os.path.exists(os.path.join(strikes, "1"))
+                   and time.monotonic() < deadline):
+                time.sleep(0.05)
+            os._exit(13)  # pylint: disable=protected-access
+        return real(fp, *args, **kwargs)
+    pydicom.dcmread = dcmread
 
 
 def _wedge_writing(uid):
@@ -323,21 +368,55 @@ def test_without_yield_exceptions_a_task_past_the_bound_raises(
     assert _no_child_left(), multiprocessing.active_children()
 
 
+@pytest.mark.parametrize("ordered", [False, True])
+def test_a_worker_that_dies_on_a_task_run_alone_fails_the_stream(
+        tmp_path, recorded_pools, ordered):
+    """Item 2 is stopped past the bound, and its run alone ends its worker.
+    That is a death like any other (#887): the stream fails with
+    `BrokenProcessPool`, after the results already delivered, and its
+    `lost` names the item run alone by its own index.
+
+    Killing mutation: a run alone keyed by a tuple sequence that the death
+    path or the ordered buffer cannot read (a `TypeError`, or a hang).
+    """
+    marker = str(tmp_path / "wedged-once")
+    items = [(value, 2, marker) for value in range(5)]
+    outcome = _run_bounded(lambda: parallel.run_parallel(
+        _wedge_once_then_die_at, items, max_workers=2, maxtasksperchild=25,
+        show_progress=False, yield_exceptions=True, ordered=ordered,
+        task_timeout=BOUND), 120)
+
+    assert not outcome["hung"]
+    assert "error" not in outcome, outcome
+    values = outcome["value"]
+    broken = values[-1]
+    assert type(broken) is BrokenProcessPool, values
+    assert not [v for v in values[:-1] if isinstance(v, BaseException)], values
+    assert (2, [items[2]]) in broken.lost, broken.lost
+    if ordered:
+        assert values[:-1] == [0, 1], values
+    else:
+        assert 2 not in values[:-1], values
+    assert _gone(recorded_pools)
+    assert _no_child_left(), multiprocessing.active_children()
+
+
 def test_a_slow_task_inside_the_bound_is_not_stopped(caplog, recorded_pools):
-    """Two tasks of 2 s each on one worker at depth 2 under a bound of
-    `BOUND`: the second is timed from when the first returned, not from when
-    it was handed over, so neither is stopped.
+    """Two tasks of 5 s each on one worker at depth 2 under a bound of 8 s:
+    the second is timed from when the first returned, not from when it was
+    handed over, so neither is stopped. The first one's clock includes the
+    worker's spawn, so the margin is 3 s.
 
     Killing mutation: a chunk's clock started at its submit, which reads the
-    second chunk as running for 4 s.
+    second chunk as running for 10 s.
     """
-    items = [(value, 2) for value in range(4)]
+    items = [(value, 5) for value in range(2)]
     with caplog.at_level(logging.WARNING, logger="isocenter"):
         outcome = _run_bounded(lambda: parallel.run_parallel(
             _sleep_then_return, items, max_workers=1, maxtasksperchild=25,
-            show_progress=False, yield_exceptions=True, task_timeout=3), 120)
+            show_progress=False, yield_exceptions=True, task_timeout=8), 120)
     assert not outcome["hung"]
-    assert sorted(outcome["value"]) == [0, 1, 2, 3], outcome
+    assert sorted(outcome["value"]) == [0, 1], outcome
     assert not _bound_records(caplog), [r.getMessage()
                                         for r in _bound_records(caplog)]
 
@@ -358,6 +437,25 @@ def test_a_thread_is_not_bounded(caplog):
     assert not outcome["hung"]
     assert sorted(outcome["value"]) == [0, 1], outcome
     assert not _bound_records(caplog)
+
+
+def test_a_shared_thread_pool_is_not_bounded(caplog):
+    """The same on an executor the caller shares: a `ThreadPoolExecutor`
+    has no worker process to end, so no watch runs on it.
+
+    Killing mutation: the watch started on any shared executor, which logs
+    a stop it cannot make.
+    """
+    with concurrent.futures.ThreadPoolExecutor(2) as executor:
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            outcome = _run_bounded(lambda: parallel.run_parallel(
+                _sleep_then_return, [(0, 2), (1, 0)], executor=executor,
+                show_progress=False, yield_exceptions=True,
+                task_timeout=1), 60)
+    assert not outcome["hung"]
+    assert outcome["value"] == [0, 1], outcome
+    assert not _bound_records(caplog), [r.getMessage()
+                                        for r in _bound_records(caplog)]
 
 
 # --- ingest (the shared pool and #654's rounds) ---------------------------------
@@ -452,6 +550,37 @@ def test_a_file_slow_only_on_the_shared_pool_costs_no_file(tmp_path,
     assert outcome["value"].ingested == 5, outcome["value"]
     assert not outcome["value"].failures
     assert _error_rows(db) == []
+
+
+def test_a_file_past_the_bound_once_after_a_death_is_read_again(tmp_path,
+                                                                monkeypatch):
+    """The first round ends on a death, not on the bound: file 1 ends its
+    worker while file 0 is wedged. The one-at-a-time round then reads file 0
+    first, and it runs past the bound; that is its first stop, so it is
+    read alone once more, returns, and reaches the store (owner ruling Q8).
+    Only file 1 is rejected, for ending its worker.
+
+    Killing mutation: a file rejected at its first stop in a one-at-a-time
+    round, whatever sent the call there.
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.setenv("ISOCENTER_TASK_TIMEOUT", str(BOUND))
+    strikes = tmp_path / "strikes"
+    strikes.mkdir()
+    _wedge_pools(monkeypatch,
+                 functools.partial(_wedge_twice_then_poison, str(strikes)))
+    src, paths = _folder(tmp_path, 4, {0: "WEDGE", 1: "POISON"})
+    db = str(tmp_path / "s.db")
+    with DicomSession(db) as session:
+        outcome = _run_bounded(lambda: session.ingest(str(src)), 240)
+    assert not outcome["hung"]
+    assert sorted(os.listdir(strikes)) == ["1", "2"]
+    summary = outcome["value"]
+    assert [p for p, _ in summary.failures] == [paths[1]], summary.failures
+    assert summary.failures[0][1].startswith(
+        io_handlers._WORKER_ENDED_READING), summary.failures
+    assert summary.ingested == 3
+    assert [uid for uid, _ in _error_rows(db)] == [paths[1]]
 
 
 def test_a_peer_ingest_on_the_stopped_pool_loses_no_file(tmp_path,
