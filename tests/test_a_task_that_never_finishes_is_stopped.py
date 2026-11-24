@@ -1174,3 +1174,44 @@ def test_the_stopped_export_reads_the_file_through_the_collision_seam(
     assert pydicom.dcmread(path).SOPInstanceUID == uid
     [(action, error)] = _rows_naming(db, uid)
     assert action == "ERROR" and "could not be read back" in error, error
+
+
+def test_a_direct_export_batch_with_no_reader_does_not_say_no_file_is_there(
+        tmp_path):
+    """A direct `DicomExporter.export_batch()` call is given no
+    `read_back_uid`, so a file at the planned path is not read back. The
+    instance is rejected, and the text says a file is there, which a
+    stopped worker may have written: never "no file is at its planned
+    path", the text before the review of #673, which is false here. With
+    no file there, that text is the one written.
+
+    Killing mutation: the no-reader text replaced by "no file is at its
+    planned path"; the file counted as written with no reader.
+    """
+    # pylint: disable=import-outside-toplevel
+    import types
+
+    def stopped(path):
+        ctx = types.SimpleNamespace(
+            writer=None, refusal=None, output_path=str(path), position=3,
+            instance=types.SimpleNamespace(sop_instance_uid="1.2.673"))
+        return parallel._TaskDidNotFinish(ctx, 7.0)
+
+    there = tmp_path / "1.2.673.dcm"
+    there.write_bytes(GARBAGE)
+    outcome = io_handlers._outcome_of_a_task_not_finished(stopped(there))
+    assert outcome.ok is False, outcome
+    assert outcome.sop_instance_uid == "1.2.673" and outcome.position == 3
+    assert "within the 7 s bound (ISOCENTER_TASK_TIMEOUT) twice" \
+        in outcome.error, outcome.error
+    assert outcome.error.endswith(
+        "a file is at its planned path, which a stopped worker may have "
+        "written; it is not counted as written"), outcome.error
+    assert "no file" not in outcome.error, outcome.error
+    assert there.read_bytes() == GARBAGE
+
+    absent = io_handlers._outcome_of_a_task_not_finished(
+        stopped(tmp_path / "absent.dcm"))
+    assert absent.ok is False
+    assert absent.error.endswith("; no file is at its planned path"), \
+        absent.error
