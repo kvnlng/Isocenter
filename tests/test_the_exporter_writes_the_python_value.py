@@ -1219,6 +1219,12 @@ def test_every_numpy_pair_set_under_at_exports_as_its_tuple(
 @pytest.mark.parametrize("pair, text", [
     pytest.param((np.uint16(0x0018), np.uint16(0x1063)), b"24\\4195 ",
                  id="numpy-pair"),
+    # Review of X5: a pair of full tags under a private tag recorded AT
+    # keeps the old route too (owner ruling Q5b, #1201). The branch first
+    # wrote it AT as two tags with no row; the 16-bit bound that does so
+    # is the standard arm's alone.
+    pytest.param((np.uint32(0x00181063), np.uint32(0x00181064)),
+                 b"1577059\\1577060 ", id="numpy-pair-of-full-tags"),
 ])
 def test_a_numpy_pair_set_under_a_private_tag_recorded_as_at_is_text(
         tmp_path, pair, text):
@@ -1239,24 +1245,6 @@ def test_a_numpy_pair_set_under_a_private_tag_recorded_as_at_is_text(
     assert (action, scope) == ("WARNING", None)
     assert details.startswith(
         "Private element (0011,1001) recorded AT, written LO. "), details
-
-
-def test_a_pair_of_full_tags_under_a_private_tag_recorded_as_at_is_two_tags(
-        tmp_path):
-    """X5 (#1026): a pair of full tags names no one tag, so it is the list
-    it equals, which fits the recorded `AT` and is written as the two
-    tags, with no row. Before, it was kept a tuple, which the gate in
-    front of a recorded VR refuses, and written as text under `LO` with
-    the re-VR row. The plain-int pair of halves is unchanged (above)."""
-    def source(given):
-        given[0x00111001] = pydicom.DataElement(0x00111001, "AT", 0x00181063)
-
-    pair = (np.uint32(0x00181063), np.uint32(0x00181064))
-    result = _run(tmp_path / "live", _through_set_attr(PRIVATE, pair),
-                  source=source)
-    assert result["written"] == 1, result["written"]
-    assert _element(result, PRIVATE) == ("AT", _ONE + _OTHER)
-    assert result["rows"] == []
 
 
 # -- An array of text under a text VR is text ---------------------------------
