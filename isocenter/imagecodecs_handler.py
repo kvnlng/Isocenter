@@ -1168,12 +1168,17 @@ def native_trailing_words(ds) -> Optional[str]:
         return None
     shape = f"{rows}x{cols}" + (f"x{samples}" if samples > 1 else "")
     one = declared == 1
+    # One byte beyond is reached only in memory (a written element is
+    # padded to an even length), after an even frame, and said singular.
+    beyond = held - need
+    single = beyond == 1
     return (f"Pixel Data holds {held} bytes, where the declared {declared} "
             f"{'frame' if one else 'frames'} of {shape} "
             f"{'needs' if one else 'need'} {need} (and one pad byte where "
-            f"that is odd): the {held - need} bytes beyond "
-            f"{'it' if one else 'them'} are not a frame and are not in the "
-            f"exported file.")
+            f"that is odd): the {beyond} {'byte' if single else 'bytes'} "
+            f"beyond {'it' if one else 'them'} "
+            f"{'is' if single else 'are'} not a frame and "
+            f"{'is' if single else 'are'} not in the exported file.")
 
 
 #: `_header_verdict`'s three answers. `UNASKED` means only that the
