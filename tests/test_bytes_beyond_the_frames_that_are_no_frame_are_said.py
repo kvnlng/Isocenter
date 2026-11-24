@@ -67,8 +67,31 @@ def test_one_pad_byte_after_an_odd_frame_is_no_row():
 
 
 def test_a_pad_byte_after_an_even_frame_is_a_row():
-    """Red if the pad rule is `> need + 1` whatever the parity: 16 + 2
-    for an even frame is two bytes too many."""
+    """16 + 1 for an even frame: the pad byte is allowed only after an odd
+    length, so one byte here is a byte too many (review of X7, finding 3).
+
+    Red if the pad rule is `held <= need + 1` whatever the parity, and if
+    the sentence says "the 1 bytes". No file door reaches it, because a
+    written element is padded to an even length; held in memory it is.
+    """
+    ds = _native(4, 4, 17)
+    assert len(ds.PixelData) == 17
+    assert native_trailing_words(ds) == (
+        "Pixel Data holds 17 bytes, where the declared 1 frame of 4x4 "
+        "needs 16 (and one pad byte where that is odd): the 1 byte beyond "
+        "it is not a frame and is not in the exported file.")
+
+
+def test_one_byte_beyond_two_even_frames_is_said_of_them():
+    """The plural subject with a singular count."""
+    assert native_trailing_words(_native(4, 4, 33, frames=2)) == (
+        "Pixel Data holds 33 bytes, where the declared 2 frames of 4x4 "
+        "need 32 (and one pad byte where that is odd): the 1 byte beyond "
+        "them is not a frame and is not in the exported file.")
+
+
+def test_two_bytes_beyond_an_even_frame_are_a_row():
+    """16 + 2: two bytes past an even frame, the plural sentence."""
     ds = _native(4, 4, 18)
     assert native_trailing_words(ds) == (
         "Pixel Data holds 18 bytes, where the declared 1 frame of 4x4 "
