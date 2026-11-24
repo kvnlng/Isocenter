@@ -41,11 +41,19 @@ CT_REQUIRED = (
     ("0028,0030", ["0.5", "0.5"]),
 )
 
-#: Overlay Rows, VR `US`. A string here encodes fine into the object
-#: graph and raises inside `save_as`, at group `6000` -- after most of
-#: the dataset is already on disk, which is what used to leave a
-#: readable partial under the real name (#198, #199).
-LATE_FAILURE_TAG = "6000,0010"
+#: Overlay Label, VR `LO`, holding `["A", None]`. That value encodes
+#: fine into the object graph and raises inside `save_as`, at group
+#: `6000` -- after most of the dataset is already on disk, which is what
+#: used to leave a readable partial under the real name (#198, #199).
+#:
+#: These tests used a `str` under Overlay Rows (`6000,0010`, US) until
+#: X5 (#1205, #1018): since then that value costs only its element,
+#: under a STANDARD `DATA_LOSS` row, and the file is written. A list
+#: holding `None` under a text VR is a shape X5's CHANGELOG names under
+#: "Not changed" as still failing the file (#1207 moved the #1053 tests
+#: to it). The group stays `6000` so the failure is still a late one.
+LATE_FAILURE_TAG = "6000,1500"
+LATE_FAILURE_VALUE = ("A", None)
 
 
 def _patient(break_instances=()):
@@ -60,7 +68,7 @@ def _patient(break_instances=()):
         for tag, value in CT_REQUIRED:
             inst.set_attr(tag, value)
         if n in break_instances:
-            inst.set_attr(LATE_FAILURE_TAG, "not-a-number")
+            inst.set_attr(LATE_FAILURE_TAG, list(LATE_FAILURE_VALUE))
         inst.set_pixel_data(np.zeros((8, 8), dtype=np.uint16))
         series.instances.append(inst)
 
