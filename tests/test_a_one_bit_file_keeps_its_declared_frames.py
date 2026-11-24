@@ -237,3 +237,26 @@ def test_a_one_bit_icon_with_bytes_beyond_it_keeps_its_declared_frames(
         "Pixel Data holds 6 bytes, room for 5 frames of 9 bits; "
         "NumberOfFrames declares 2, which need 3 bytes. Kept the first 2 and "
         "discarded 3."), rows
+
+
+def test_a_whole_byte_frame_under_an_empty_number_of_frames_reads_every_frame(
+        tmp_path):
+    """The shape #1094 does not fix, read from its source file.
+
+    A 4x4 frame at 8 bits is a whole number of bytes, so the bit count
+    does not apply. Under a NumberOfFrames that holds no value in the
+    file, 32 bytes hold two whole frames, and the source read returns
+    both, with no error: it does not refuse "as for every other excess".
+    CHANGELOG and docs/codecs.md say so; this pins what they say.
+    """
+    ds = dataset(EXPLICIT_LE, rows=4, cols=4, bits_allocated=8,
+                 native=bytes(range(32)), photometric="MONOCHROME2")
+    ds.NumberOfFrames = None
+    path = write(tmp_path, ds)
+    assert pydicom.dcmread(path)["NumberOfFrames"].is_empty
+
+    got = Instance(ds.SOPInstanceUID, SOP_CLASS, 1,
+                   file_path=path).get_pixel_data()
+
+    assert got.shape == (2, 4, 4)
+    assert got.tobytes() == bytes(range(32))
