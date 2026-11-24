@@ -13595,18 +13595,33 @@ def _numeric_arm(vr, value):
     raise ValueError(f"the value fits no numeric arm of {vr}")
 
 
-def _outcome_of_a_task_not_finished(stopped) -> "ExportOutcome":
-    """The failed `ExportOutcome` for an instance whose export did not
-    finish within the time bound twice (#673; owner ruling Q7).
+def _outcome_of_a_task_not_finished(stopped,
+                                    read_back_uid=None) -> "ExportOutcome":
+    """The `ExportOutcome` for an instance whose export did not finish
+    within the time bound twice (#673; owner ruling Q7).
+
+    Failed, except where a file is at the planned path and `read_back_uid`
+    reads the instance's own SOP Instance UID from it (owner ruling
+    2026-11-23): the worker renames its file into place before it returns,
+    so a worker stopped after the rename leaves the whole file. That
+    instance counts as written, with one warning: what the stopped worker
+    found while writing never reached the parent. A plugin's instance is
+    never read back: there is no planned path to read.
 
     Args:
         stopped (_TaskDidNotFinish): The pool's report; its `item` is the
             `ExportContext`.
+        read_back_uid (Optional[Callable[[str], Optional[str]]]): The
+            reader of a file's `(0008,0018)`, None when it cannot be read.
+            `session.export()` passes `session._sop_instance_uid_in`, the
+            reader #1020's collision arm uses. None: no file is read
+            back, and a file at the planned path is not counted.
 
     Returns:
-        ExportOutcome: `ok=False`, its UID and plan position, an `error`
-        naming the bound and no path, and `handed` True for a plugin's
-        instance.
+        ExportOutcome: Either `ok=True` with the planned path and one
+        warning, or `ok=False` with an `error` naming the bound and no
+        path; its UID and plan position either way, and `handed` True for
+        a plugin's instance.
     """
     ctx = stopped.item
     writer = getattr(ctx, "writer", None)
@@ -13621,32 +13636,63 @@ def _outcome_of_a_task_not_finished(stopped) -> "ExportOutcome":
     # raises at once and never reaches the bound.
     handed = writer is not None and not refused
     output_path = getattr(ctx, "output_path", None)
+    uid = getattr(getattr(ctx, "instance", None), "sop_instance_uid", None)
+    position = getattr(ctx, "position", None)
+    stopped_text = (f"its export did not finish within the {stopped.bound:g} "
+                    f"s bound (ISOCENTER_TASK_TIMEOUT) twice, the second "
+                    f"time alone on a fresh worker process, and each worker "
+                    f"it ran on was stopped")
     if writer is not None:
         what = ("the exporter was handed its dataset, and what it wrote or "
                 "kept of it is not known")
     elif output_path and os.path.exists(output_path):
-        # The worker writes its file and renames it into place before it
-        # returns, so a worker stopped after the rename leaves the file
-        # (review of #673). It may also be a file an earlier export left
-        # under the same name. Either way it is not counted as written:
-        # nothing this export reports vouches for it.
-        what = ("a file is at its planned path, which a stopped worker may "
-                "have written; it is not counted as written")
+        # A worker stopped after its rename leaves its file (review of
+        # #673). The file is read back as `_report_export_collisions` reads
+        # one (#1020), by the same reader, and decides (owner ruling
+        # 2026-11-23). It is never deleted, whatever it holds.
+        held = None if read_back_uid is None else read_back_uid(output_path)
+        if read_back_uid is not None and isinstance(uid, str) and uid \
+                and held == uid:
+            # Counted, and still a `WARNING` row, for two facts read from
+            # this module: the worker gathers its `DATA_LOSS` and
+            # `WARNING` findings before the rename and returns them only
+            # after it, so a stopped worker's findings about this file are
+            # lost, and a file without its loss rows must not grade PASS;
+            # and files are named by UID while an export into a folder an
+            # earlier export used is allowed, so the file read back may be
+            # that export's, written under another policy. No path: it is
+            # `Subject_<Patient ID>/...`.
+            return ExportOutcome(
+                ok=True, output_path=output_path, sop_instance_uid=uid,
+                warnings=[
+                    f"I{stopped_text[1:]}. A file at its "
+                    f"planned path holds its SOP Instance UID (0008,0018), "
+                    f"so it is counted as written. What the stopped worker "
+                    f"found while writing it (elements it dropped, claims "
+                    f"of the source it could not honour) did not reach "
+                    f"this process, and the file may be one an earlier "
+                    f"export left under the same name."],
+                position=position, handed=handed)
+        if read_back_uid is None:
+            what = ("a file is at its planned path, which a stopped worker "
+                    "may have written; it is not counted as written")
+        elif held is None:
+            what = ("a file is at its planned path, and its SOP Instance "
+                    "UID (0008,0018) could not be read back from it, so it "
+                    "is not counted as written")
+        else:
+            # The UID read is not quoted: it is whatever the file holds.
+            what = ("a file is at its planned path, and it holds another "
+                    "SOP Instance UID (0008,0018), so it is not counted as "
+                    "written")
     else:
         what = "no file is at its planned path"
     # Text, not the exception: `_report_export_failures` keeps a string as
     # given, and the class name would add nothing a reader needs. It names
     # no path (the output path is `Subject_<Patient ID>/...`).
     return ExportOutcome(
-        ok=False, output_path=output_path,
-        sop_instance_uid=getattr(getattr(ctx, "instance", None),
-                                 "sop_instance_uid", None),
-        error=(f"its export did not finish within the {stopped.bound:g} s "
-               f"bound (ISOCENTER_TASK_TIMEOUT) twice, the second time "
-               f"alone on a fresh worker process, and each worker it ran on "
-               f"was stopped; {what}"),
-        position=getattr(ctx, "position", None),
-        handed=handed)
+        ok=False, output_path=output_path, sop_instance_uid=uid,
+        error=f"{stopped_text}; {what}", position=position, handed=handed)
 
 
 def _in_plan_order(results) -> list:
@@ -14152,7 +14198,8 @@ class DicomExporter:
             executor=None,
             maxtasksperchild: int = None,
             disable_gc: bool = False,
-            store_backend=None):
+            store_backend=None,
+            read_back_uid=None):
         """
         Exports a flat list of ExportContexts using parallel workers.
 
@@ -14167,6 +14214,11 @@ class DicomExporter:
                 `DATA_LOSS` audit entry for each element the workers could
                 not write. Without it the losses are still logged, but
                 only logged.
+            read_back_uid (Callable[[str], Optional[str]], optional): The
+                reader of a file's SOP Instance UID, for an instance whose
+                worker was stopped at the time bound with a file at its
+                planned path (#673): a file holding the instance's UID
+                counts as written. None: such a file is not counted.
 
         Returns:
             ExportSummary: what reached disk and what did not. An
@@ -14203,7 +14255,7 @@ class DicomExporter:
         # as `_TaskDidNotFinish` holding its context: an outcome naming it,
         # in its place in the plan, so its row is keyed on its UID and not
         # UNKNOWN.
-        results = (_outcome_of_a_task_not_finished(r)
+        results = (_outcome_of_a_task_not_finished(r, read_back_uid)
                    if isinstance(r, _TaskDidNotFinish) else r
                    for r in results)
 

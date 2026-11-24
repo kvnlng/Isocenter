@@ -10117,7 +10117,11 @@ class DicomSession:
                 total=len(tasks),
                 maxtasksperchild=25,
                 disable_gc=True,
-                store_backend=store_backend)
+                store_backend=store_backend,
+                # The one reader of a written file's UID, the one #1020's
+                # collision arm reads with, read from this module at this
+                # call: a test that replaces it reaches both (#673).
+                read_back_uid=_sop_instance_uid_in)
         except Exception as exc:
             get_logger().error("Export Failed! Error: %s", describe_exception(exc))
             raise
