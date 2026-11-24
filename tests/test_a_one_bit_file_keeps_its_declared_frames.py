@@ -260,3 +260,26 @@ def test_a_whole_byte_frame_under_an_empty_number_of_frames_reads_every_frame(
 
     assert got.shape == (2, 4, 4)
     assert got.tobytes() == bytes(range(32))
+
+
+def test_a_whole_byte_one_bit_frame_under_an_empty_number_of_frames_reads_every_frame(
+        tmp_path):
+    """A bit-packed frame that is a whole number of bytes is not counted in bits.
+
+    8x8 at one bit is 64 bits, eight whole bytes, so `_native_excess`
+    takes the byte arm. Under a NumberOfFrames that holds no value in the
+    file, 16 bytes hold two whole frames, and the source read returns
+    both, with no error, as for the 8-bit shape above. CHANGELOG and
+    docs/codecs.md say the bit count, and the refusal of the source read,
+    are for a bit-packed frame that is not a whole number of bytes; this
+    pins the 1-bit shape that qualifier leaves out.
+    """
+    ds = _file(8, 8, None, 16)
+    ds.NumberOfFrames = None
+    path = write(tmp_path, ds)
+    assert pydicom.dcmread(path)["NumberOfFrames"].is_empty
+
+    got = Instance(ds.SOPInstanceUID, SOP_CLASS, 1,
+                   file_path=path).get_pixel_data()
+
+    assert got.shape == (2, 8, 8)
