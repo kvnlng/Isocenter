@@ -176,8 +176,10 @@ def test_the_helper_reports_the_table_and_both_counts():
     assert h(_dataset(2, 0)) == (2, 1, 0, "Basic Offset Table")
     assert h(_dataset(2, 1, table="eot")) == (
         2, 1, 1, "Extended Offset Table")
-    # Undetectable, and said so: None, not a guess.
-    assert h(_dataset(2, 1, table="empty")) is None
+    # Two whole codestreams under one declared frame and no table: each
+    # fragment is a frame (#1088). It was None, "undetectable".
+    assert h(_dataset(2, 1, table="empty")) == (
+        2, 1, 1, imagecodecs_handler.WholeStreams("JPEG 2000 codestream"))
     # Native pixel data is not encapsulated: no table to compare.
     native = _dataset(1, 1)
     native.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
@@ -363,14 +365,25 @@ def test_the_handler_reads_the_extended_offset_table():
     assert "NumberOfFrames declares 1" in msg
 
 
-def test_an_empty_offset_table_is_the_documented_limit_and_decodes_as_before():
-    """T6: nothing can count frames here, so nothing refuses.
+def test_an_empty_offset_table_over_a_split_frame_decodes_as_before():
+    """T6: one frame split across two fragments is one frame.
 
     Pinned so that a check which refused every multi-fragment empty-BOT
     file -- one frame may legally span several fragments -- goes red.
+    Two *whole* codestreams under one declared frame are counted since
+    #1088 (`test_whole_codestreams_under_one_frame_keep_frame_0.py`), and
+    kept to frame 0 when the decode is asked to drop the excess.
     """
-    out, _label = through_the_fallback(_dataset(2, 1, table="empty"))
+    stream = _codestream(FRAMES[0])
+    half = len(stream) // 2 + (len(stream) // 2) % 2
+    ds = _dataset(1, 1, table="empty")
+    ds.PixelData = encapsulate([stream[:half], stream[half:]], has_bot=False)
+    assert imagecodecs_handler.offset_table_frame_count(ds) is None
+    out, _label = through_the_fallback(ds)
     assert out.shape == (4, 4)
+    assert np.array_equal(out, FRAMES[0])
+    out, _label = through_the_fallback(_dataset(2, 1, table="empty"),
+                                       allow_excess_frames=False)
     assert np.array_equal(out, FRAMES[0])
 
 
@@ -720,7 +733,7 @@ def test_an_icon_naming_fewer_frames_is_not_carried_and_says_why(tmp_path):
         assert details.startswith(
             f"Standard tag 7fe0,0010 (OB) at {ICON_PATH_WORDS} was not "
             f"ingested: "), details
-        assert "Basic Offset Table names 1 frames" in details, details
+        assert "Basic Offset Table names 1 frame" in details, details
         assert "NumberOfFrames declares 2" in details, details
         assert "unrouted" not in details, details
     finally:

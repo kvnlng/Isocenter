@@ -14,15 +14,18 @@ here, which it then slices by. Measured on 067982ec, 3.12.14 and 3.14.7t,
 Those are CPython's words for a list index, about nothing in the file,
 and a row is not to quote text an interpreter chose.
 
-The file is still refused (owner ruling Q1 A; keeping the declared
-frames is a follow-up). The refusal is raised at the top of
-`io_handlers._decode_pixels`, so ingest, `Instance.get_pixel_data()`, the
-export readback and an icon all say it, in a sentence of numbers:
+The refusal is raised at the top of `io_handlers._decode_pixels`, in a
+sentence of numbers, for a decode that keeps every frame:
 
     Pixel Data holds 6 bytes, room for 5 frames of 3x3 at one bit per
     sample, where NumberOfFrames is read as 2 and they need 3: a frame
     here is 9 bits, not a whole number of bytes, so the bytes beyond the
     declared frames cannot be read as frames.
+
+Since #1094 ingest and an icon keep the declared frames instead, with a
+`DATA_LOSS` row (`test_a_one_bit_file_keeps_its_declared_frames.py`),
+and `Instance.get_pixel_data()` refuses through `frame_count_mismatch`,
+as for every other excess; the sentence is a direct `_decode_pixels(ds)`'s.
 
 **The predicate is pydicom's, not "more bytes than the frames and a
 pad".** A 3x3 frame of three samples is 27 bits; five or six bytes under
@@ -45,7 +48,8 @@ from pydicom.pixels import get_decoder
 from pydicom.sequence import Sequence
 
 from isocenter.entities import Instance
-from isocenter.imagecodecs_handler import bit_packed_excess_words
+from isocenter.imagecodecs_handler import (bit_packed_excess_words,
+                                           frame_count_mismatch_words)
 from isocenter.io_handlers import _decode_pixels, ingest_worker
 from isocenter.session import DicomSession
 from support.decode_doors import EXPLICIT_LE, SOP_CLASS, dataset, write
@@ -143,15 +147,21 @@ def test_a_cell_pydicom_cannot_slice_is_refused_in_one_sentence(
     assert type(caught.value) is RuntimeError
     assert str(caught.value) == want
 
-    assert ingest_worker(path)[-1] == (
-        f"Decompression Failed: RuntimeError: {want}")
+    _keeps_the_declared_frames(path, ds.SOPInstanceUID)
 
-    inst = Instance(ds.SOPInstanceUID, SOP_CLASS, 1, file_path=path)
+
+def _keeps_the_declared_frames(path, uid):
+    """#1094: ingest keeps them with the excess counted; the read door refuses."""
+    result = ingest_worker(path)
+    assert result[-1] is None, result[-1]
+    words = frame_count_mismatch_words(result[0]["offset_table_excess"])
+    assert words.startswith("Pixel Data holds "), words
+    inst = Instance(uid, SOP_CLASS, 1, file_path=path)
     with pytest.raises(RuntimeError) as read:
         inst.get_pixel_data()
     assert str(read.value) == (
         f"Lazy load failed for instance {inst.sop_instance_uid}: "
-        f"RuntimeError: {want}")
+        f"RuntimeError: {words}")
 
 
 def test_the_sentence_whole_for_two_cells():
@@ -304,14 +314,10 @@ def test_a_number_of_frames_holding_no_value_is_read_as_one(
     assert "NumberOfFrames is read as 1 and it needs" in want
 
     assert bit_packed_excess_words(pydicom.dcmread(path)) == want
-    assert ingest_worker(path)[-1] == (
-        f"Decompression Failed: RuntimeError: {want}")
-    inst = Instance(ds.SOPInstanceUID, SOP_CLASS, 1, file_path=path)
-    with pytest.raises(RuntimeError) as read:
-        inst.get_pixel_data()
-    assert str(read.value) == (
-        f"Lazy load failed for instance {inst.sop_instance_uid}: "
-        f"RuntimeError: {want}")
+    with pytest.raises(RuntimeError) as caught:
+        _decode_pixels(pydicom.dcmread(path))
+    assert str(caught.value) == want
+    _keeps_the_declared_frames(path, ds.SOPInstanceUID)
 
 
 def test_a_number_of_frames_holding_no_value_over_whole_frames_is_read(
@@ -347,12 +353,19 @@ def test_a_one_by_one_frame_is_one_bit(tmp_path):
     """Singular, from a file: four bytes under one 1x1 frame."""
     path = write(tmp_path, _file(1, 1, 1, 4))
 
-    assert ingest_worker(path)[-1] == (
-        "Decompression Failed: RuntimeError: Pixel Data holds 4 bytes, room "
+    with pytest.raises(RuntimeError) as caught:
+        _decode_pixels(pydicom.dcmread(path))
+    assert str(caught.value) == (
+        "Pixel Data holds 4 bytes, room "
         "for 32 frames of 1x1 at one bit per sample, where NumberOfFrames "
         "is read as 1 and it needs 1: a frame here is 1 bit, not a whole "
         "number of bytes, so the bytes beyond the declared frames cannot be "
         "read as frames.")
+    result = ingest_worker(path)
+    assert result[-1] is None, result[-1]
+    assert frame_count_mismatch_words(result[0]["offset_table_excess"]) == (
+        "Pixel Data holds 4 bytes, room for 32 frames of 1 bit; "
+        "NumberOfFrames declares 1, which needs 1 byte")
 
 
 def _ybr_422(rows, cols, frames, have):
@@ -425,8 +438,10 @@ def test_under_ybr_full_the_sentence_is_said_as_under_rgb(
     want = _sentence(rows, cols, frames, have, samples=3)
 
     assert bit_packed_excess_words(ds) == want
-    assert ingest_worker(write(tmp_path, ds))[-1] == (
-        f"Decompression Failed: RuntimeError: {want}")
+    with pytest.raises(RuntimeError) as caught:
+        _decode_pixels(ds)
+    assert str(caught.value) == want
+    _keeps_the_declared_frames(write(tmp_path, ds), ds.SOPInstanceUID)
 
 
 def _without(keyword):
@@ -564,12 +579,12 @@ def test_an_encapsulated_one_bit_frame_is_not_this_refusals():
 
 
 # ---------------------------------------------------------------------------
-# An icon: the icon is dropped, never the file
+# An icon: since #1094 its declared frames are kept, never the file lost
 # ---------------------------------------------------------------------------
 
-def test_a_one_bit_icon_with_bytes_beyond_it_costs_the_icon_not_the_file(
+def test_a_one_bit_icon_with_bytes_beyond_it_keeps_its_declared_frames(
         tmp_path):
-    """`_decode_nested_pixels` turns any refusal into a loss row for the icon."""
+    """`_decode_nested_pixels` asks the same count: the icon keeps 2 frames."""
     ds = _file(4, 4, None, 16, bits_allocated=8)
     icon = Dataset()
     icon.Rows, icon.Columns, icon.SamplesPerPixel = 3, 3, 1
@@ -597,3 +612,4 @@ def test_a_one_bit_icon_with_bytes_beyond_it_costs_the_icon_not_the_file(
             "IN ('DATA_LOSS', 'ERROR')").fetchall()
     assert [action for action, _details in rows] == ["DATA_LOSS"], rows
     assert "7fe0,0010" in rows[0][1].lower(), rows
+    assert rows[0][1].endswith("Kept the first 2 and discarded 3."), rows

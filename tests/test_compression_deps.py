@@ -132,8 +132,11 @@ def test_an_unimportable_imagecodecs_gets_advice_that_names_it(
     # are not (they can hold an install path), and the advice line names
     # the command that shows them.
     assert ("imagecodecs could not decode it either: ImagecodecsUnavailable: "
-            "imagecodecs is not available: its import raised ImportError "
-            "(caused by ") in whole
+            "imagecodecs is not available: its import raised ImportError\n"
+            ) in whole
+    # The message quotes the refusal, so no `(caused by ...)` repeats it
+    # (#1089).
+    assert "caused by" not in whole
     assert "libjpeg.so.8" not in whole
     assert "Active pydicom handlers" not in whole
     assert "gdcm' are installed" not in whole
@@ -294,7 +297,7 @@ def test_a_refusal_made_before_any_decoder_is_asked_gets_no_advice(
     assert rle_has_no_plugin["asked"] == 0
     assert str(error) == (
         f"Lazy load failed for instance {inst.sop_instance_uid}: "
-        f"RuntimeError: Basic Offset Table names 1 frames; NumberOfFrames "
+        f"RuntimeError: Basic Offset Table names 1 frame; NumberOfFrames "
         f"declares 2")
 
 

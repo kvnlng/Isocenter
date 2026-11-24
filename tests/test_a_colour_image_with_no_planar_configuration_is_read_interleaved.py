@@ -366,7 +366,9 @@ def test_a_one_bit_excess_still_gets_its_own_sentence(tmp_path):
 
     A decode option leaves the header incomplete for the two readers that
     build their own runner, and pydicom then fails in CPython's words
-    (`slice indices must be integers`).
+    (`slice indices must be integers`). Since #1094 the sentence is a
+    direct decode's, which keeps every frame; ingest keeps the declared
+    frame, and is asked too, so the inference reaches that route as well.
     """
     ds = _base()
     ds.Rows = ds.Columns = 3
@@ -378,8 +380,10 @@ def test_a_one_bit_excess_still_gets_its_own_sentence(tmp_path):
     path = _save(tmp_path / "src", "onebit", ds)
     with DicomSession(str(tmp_path / "s.db")) as session:
         summary = session.ingest(os.path.dirname(path))
-    assert summary.ingested == 0
-    reason = summary.failures[0][1]
+    assert (summary.ingested, list(summary.failures)) == (1, [])
+    with pytest.raises(RuntimeError) as caught:
+        _decode_pixels(pydicom.dcmread(path))
+    reason = str(caught.value)
     assert "Planar Configuration" not in reason, reason
     assert "slice indices" not in reason, reason
     from isocenter.imagecodecs_handler import bit_packed_excess_words  # pylint: disable=import-outside-toplevel

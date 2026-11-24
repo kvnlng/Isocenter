@@ -820,13 +820,14 @@ def one_bit_excess(out: Path):
     decodes that many, a count that is not a whole number of bytes each,
     and fails in CPython's words for a slice, so the row read
     `Decompression Failed: TypeError: slice indices must be integers ...`.
-    It is refused in a sentence naming the bytes held and needed.
+    #1062 refused it in a sentence naming the bytes held and needed; since
+    #1094 its two declared frames are kept, with a `DATA_LOSS` row.
 
     A fourth file, of a fourth patient: the same four bytes under a
     NumberOfFrames `(0028,0008)` that is present and holds no value.
     pydicom reads that as one frame, so the four bytes have room for
-    three, and it fails the same way. It is refused in the same sentence,
-    which says `NumberOfFrames is read as 1`.
+    three, and it fails the same way. Since #1094 its one frame is kept,
+    with a row saying `NumberOfFrames is empty (read as 1)`.
 
     No other input holds a native 1-bit frame."""
     write(ct("one_bit_excess", study=1, pid="GOLD-one_bit_excess-good"),
@@ -956,6 +957,153 @@ def _encapsulated(member, study, label, frames, declared, syntax, has_bot):
     return ds
 
 
+def decode_refusal_words(out: Path):
+    """An ordinary CT and five JPEG 2000 Lossless files, each of its own
+    patient, each refused at ingest in a sentence of its own (#1086,
+    #1087, #1067, #1091).
+
+    `-zeros` is one fragment of 64 zero bytes. Pillow cannot identify it,
+    and pydicom's message quoted the `BytesIO` it handed Pillow with its
+    memory address, so the row was different on every run; it is now
+    written `<_io.BytesIO object>`, and the fallback's error is said once.
+    `-lengths-empty` and `-lengths-absent` hold two frames in two
+    fragments under NumberOfFrames 2 and an Extended Offset Table of two
+    offsets, beside an Extended Offset Table Lengths that is empty or
+    absent. pydicom failed on each in CPython's words (`TypeError: object
+    of type 'NoneType' has no len()`, `AttributeError: ... no attribute
+    'ExtendedOffsetTableLengths'`); each is refused in a sentence naming
+    both elements. `-one-offset` holds an Extended Offset Table of one
+    offset beside one length under NumberOfFrames 2, refused as
+    `Extended Offset Table names 1 frame`, no longer `1 frames`.
+    `-dropped-over-basic` holds one fragment under NumberOfFrames 2, a
+    Basic Offset Table naming 1, and an Extended Offset Table of three
+    offsets beside 4 bytes of Lengths, which pydicom drops. Its row said
+    `with no offset table` over a file holding two; it is counted by the
+    Basic Offset Table pydicom reads by. No other input holds any of
+    these shapes."""
+    member, j2k = "decode_refusal_words", "1.2.840.10008.1.2.4.90"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    write(_encapsulated(member, 2, "zeros", (bytes(64),), 1, j2k, False),
+          out / f"{member}-zeros.dcm")
+    for study, label in ((3, "lengths-empty"), (4, "lengths-absent")):
+        ds = _encapsulated(member, study, label, _J2K_FRAMES, 2, j2k, False)
+        ds.add_new(0x7FE00001, "OV", _true_offsets(_J2K_FRAMES))
+        if label == "lengths-empty":
+            ds.add_new(0x7FE00002, "OV", b"")
+        write(ds, out / f"{member}-{label}.dcm")
+    ds = _encapsulated(member, 5, "one-offset", _J2K_FRAMES, 2, j2k, False)
+    ds.add_new(0x7FE00001, "OV", _true_offsets(_J2K_FRAMES[:1]))
+    ds.add_new(0x7FE00002, "OV", struct.pack("<Q", len(_J2K_FRAMES[0])))
+    write(ds, out / f"{member}-one-offset.dcm")
+    ds = _encapsulated(member, 6, "dropped-over-basic", _J2K_FRAMES[:1], 2,
+                       j2k, True)
+    ds.add_new(0x7FE00001, "OV", struct.pack("<3Q", 0, 1, 2))
+    ds.add_new(0x7FE00002, "OV", b"\0" * 4)
+    write(ds, out / f"{member}-dropped-over-basic.dcm")
+
+
+def icon_label_samples(out: Path):
+    """A CT whose one-sample Icon Image Sequence item is labelled `RGB`
+    (#1081). The export wrote it as held with no row, under PASS; it is
+    still written as held, with one `WARNING` naming the item, the label
+    and the sample count, and the run grades `REVIEW_REQUIRED`. No other
+    input holds an icon whose label contradicts its sample count."""
+    member = "icon_label_samples"
+    ds = ct(member, pid=f"GOLD-{member}")
+    icon = Dataset()
+    icon.Rows = icon.Columns = 2
+    icon.SamplesPerPixel = 1
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.PhotometricInterpretation = "RGB"
+    icon.add_new(0x7FE00010, "OB", bytes([11, 22, 33, 44]))
+    ds.IconImageSequence = Sequence([icon])
+    write(ds, out / f"{member}.dcm")
+
+
+def whole_codestreams(out: Path):
+    """An ordinary CT and two JPEG 2000 Lossless files of two other
+    patients, each the two `_J2K_FRAMES` codestreams in two fragments with
+    an empty Basic Offset Table, one under NumberOfFrames 1 and one with
+    NumberOfFrames absent (#1088). pydicom joined the fragments and read
+    the first codestream, so the second image was lost with no row and the
+    grade was PASS. Each fragment is now counted as a frame: frame 0 is
+    kept, with one `DATA_LOSS` row (`Pixel Data's fragments hold 2 frames,
+    one whole JPEG 2000 codestream per fragment`). No other input holds
+    whole codestreams under one declared frame."""
+    member, j2k = "whole_codestreams", "1.2.840.10008.1.2.4.90"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    for study, label in ((2, "one-frame"), (3, "no-frames")):
+        ds = _encapsulated(member, study, label, _J2K_FRAMES, 1, j2k, False)
+        if label == "no-frames":
+            del ds.NumberOfFrames
+        write(ds, out / f"{member}-{label}.dcm")
+
+
+def trailing_bytes(out: Path):
+    """A 4x4 8-bit native CT whose Pixel Data holds 22 bytes, where its one
+    frame needs 16 (#1090). The six bytes beyond the frame are no frame and
+    are not in the exported file; that was silent. Ingest now writes one
+    STANDARD `DATA_LOSS` row naming both counts, which does not cost PASS.
+    pydicom's `MR_small_padded.dcm` is the other input of this shape."""
+    member = "trailing_bytes"
+    ds = ct(member, pid=f"GOLD-{member}", rows=4, cols=4)
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+    ds.PixelData = bytes((13 * i) % 256 for i in range(22))
+    write(ds, out / f"{member}.dcm")
+
+
+#: One 4x4 JPEG 2000 Lossless codestream whose SIZ declares signed 16-bit
+#: samples (`ssiz` 0x8f): `i * -37` for i in 0..15. A literal, for the
+#: reason `_J2K_FRAMES` gives.
+_SIGNED_J2K = bytes.fromhex(
+    "ff4fff5100290000000000040000000400000000000000000000000400000004"
+    "000000000000000000018f0101ff52000c00000001000004040001ff5c000440"
+    "80ff640025000143726561746564206279204f70656e4a504547207665727369"
+    "6f6e20322e352e34ff90000a0000000000270001ff93c07ec2a01f94a517f998"
+    "530cae0311fb69a0ce03263934275cffd9")
+
+
+def signed_bad_header(out: Path):
+    """An ordinary CT and one JPEG 2000 Lossless file of another patient:
+    a signed codestream (`_SIGNED_J2K`) under PixelRepresentation 0 and a
+    Bits Stored of 17 beside Bits Allocated 16 (#1085). It was refused in
+    the signed-codestream sentence, which never named the bad element; it
+    is refused in pydicom's sentence about Bits Stored. A signed file with
+    a header pydicom accepts keeps the signed sentence."""
+    member = "signed_bad_header"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    ds = _encapsulated(member, 2, "bits-stored-17", (_SIGNED_J2K,), 1,
+                       "1.2.840.10008.1.2.4.90", False)
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 16, 17, 15
+    write(ds, out / f"{member}-bits-stored-17.dcm")
+
+
+def icon_without_pixels(out: Path):
+    """A CT whose three-sample 2x2 Icon Image Sequence item holds 5 bytes of
+    Pixel Data, where its descriptors need 12 (#1082). Ingest cannot hold
+    the icon's pixels; its row said `Standard tag 7fe0,0010 (OB) was not
+    ingested` and named no item, and the export wrote the item with its
+    descriptors and no Pixel Data, under PASS. The row now names the item
+    (`at 0088,0200[0]`), and the export leaves the item out with one
+    STANDARD `DATA_LOSS` row naming it. `label_spelling`'s two icon files
+    are the other inputs of this shape."""
+    member = "icon_without_pixels"
+    ds = ct(member, pid=f"GOLD-{member}")
+    icon = Dataset()
+    icon.Rows = icon.Columns = 2
+    icon.SamplesPerPixel, icon.PlanarConfiguration = 3, 0
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.PhotometricInterpretation = "RGB"
+    icon.add_new(0x7FE00010, "OB", bytes([1, 2, 3, 4, 5]))
+    ds.IconImageSequence = Sequence([icon])
+    write(ds, out / f"{member}.dcm")
+
+
 def fewer_fragments_than_frames(out: Path):
     """An ordinary CT and one JPEG 2000 Lossless file of another patient:
     two frames in two fragments under NumberOfFrames 3, an empty Basic
@@ -996,7 +1144,9 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
     Its pixels are on a server, not absent, so it is not written without
     them: its export fails with the same sentence, naming `JPIP
     Referenced`, as it did before #1093 (owner ruling of 2026-10-12).
-    It is here so that a change to that is seen."""
+    It is here so that a change to that is seen. Since #1097 it is
+    refused at ingest, in a sentence naming the syntax and never the
+    URL; its export no longer runs."""
     member = "no_pixels_under_an_undecodable_syntax"
     write(ct(member, study=1, pid=f"GOLD-{member}-good"),
           out / f"{member}-good.dcm")
@@ -1026,6 +1176,44 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
     del ds.PixelData
     ds.PixelDataProviderURL = "http://jpip.invalid/golden?target=GOLD-jpip"
     write(ds, out / f"{member}-jpip.dcm")
+
+
+def pixels_elsewhere(out: Path):
+    """An ordinary CT and a CT header of another patient with no pixel
+    element and a Pixel Data Provider URL `(0028,7FE0)`, under Explicit VR
+    Little Endian: the twin of `no_pixels_under_an_undecodable_syntax-jpip`
+    under a syntax pydicom decodes (#1097). It was ingested and exported
+    with the URL as it stood, graded PASS, the source's identifiers in the
+    URL's query. It is refused at ingest, in a sentence that names the
+    element and never quotes the URL."""
+    member = "pixels_elsewhere"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    ds = ct(member, study=2, pid=f"GOLD-{member}-url")
+    del ds.PixelData
+    ds.PixelDataProviderURL = "http://jpip.invalid/golden?target=GOLD-url"
+    write(ds, out / f"{member}-url.dcm")
+
+
+def ybr_ict_source(out: Path):
+    """A 4x5 three-sample Secondary Capture labelled `YBR_ICT` over native
+    8-bit samples, Planar Configuration 0 (#1080). The JPEG 2000 export
+    encodes such a frame with the reversible colour transform, which
+    PS3.5 8.2.4 names `YBR_RCT`, and wrote it labelled `YBR_ICT`, the
+    irreversible transform's name, with no row under PASS. It is written
+    `YBR_RCT`, with an INFO note. Uncompressed, the label keeps its
+    `WARNING`. No other input is held under `YBR_ICT` after ingest:
+    pydicom-data's `US1_J2KI.dcm` is relabelled `RGB` by its decode."""
+    member = "ybr_ict_source"
+    ds = ct(member, rows=4, cols=5, pid=f"GOLD-{member}")
+    ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID = \
+        "1.2.840.10008.5.1.4.1.1.7"
+    ds.Modality = "OT"
+    ds.SamplesPerPixel, ds.PlanarConfiguration = 3, 0
+    ds.PhotometricInterpretation = "YBR_ICT"
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+    ds.PixelData = bytes((29 * i + 7) % 256 for i in range(4 * 5 * 3))
+    write(ds, out / f"{member}.dcm")
 
 
 def private_vr_unlike_the_dictionary(out: Path):
@@ -1324,7 +1512,10 @@ MEMBERS = {f.__name__: f for f in (
     no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary,
     no_planar_configuration, structured_report, private_creators,
     declared_planar_configuration, number_vr_on_a_text_tag,
-    text_or_number_vr_on_a_binary_or_numeric_tag)}
+    text_or_number_vr_on_a_binary_or_numeric_tag,
+    decode_refusal_words, icon_label_samples,
+    whole_codestreams, trailing_bytes, signed_bad_header,
+    icon_without_pixels, pixels_elsewhere, ybr_ict_source)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

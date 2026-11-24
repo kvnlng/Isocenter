@@ -521,10 +521,12 @@ def test_an_encapsulation_the_gate_cannot_walk_is_left_to_pydicom(tmp_path):
     assert imagecodecs_handler.signed_codestream_refusal(ds) is None
     decoded = at_decode_pixels(write(tmp_path, ds))
     assert type(decoded) is ValueError, decoded  # pylint: disable=unidiomatic-typecheck
-    assert str(decoded).startswith(
+    # imagecodecs walks the buffer with pydicom's own generator and is
+    # refused in the same words, which are said once (#1089).
+    assert str(decoded) == (
         "Unexpected tag '(0000,0000)' at offset 8 when parsing the "
         "encapsulated pixel data fragment items; imagecodecs could not "
-        "decode it either: "), str(decoded)
+        "decode it either, for the same reason"), str(decoded)
 
 
 def test_a_signed_codestream_with_no_pixel_representation_is_refused_by_pydicom(

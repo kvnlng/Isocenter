@@ -20,6 +20,7 @@ import isocenter.imagecodecs_handler as h
 from .logger import describe_exception_without_paths, get_logger
 from .pixel_geometry import (
     SIDECAR_DTYPE_NAMES,
+    _cs_spelling,
     GeometryEvidence,
     PIXEL_DTYPE_ATTR,
     declared_int,
@@ -997,6 +998,44 @@ _JPIP_REFERENCED_SYNTAXES = frozenset({
     "1.2.840.10008.1.2.4.204", "1.2.840.10008.1.2.4.205"})
 
 
+#: The names `pixels_elsewhere_words` gives the JPIP Referenced syntaxes.
+_JPIP_NAMES = {
+    "1.2.840.10008.1.2.4.94": "JPIP Referenced",
+    "1.2.840.10008.1.2.4.95": "JPIP Referenced Deflate",
+    "1.2.840.10008.1.2.4.204": "JPIP HTJ2K Referenced",
+    "1.2.840.10008.1.2.4.205": "JPIP HTJ2K Referenced Deflate"}
+
+
+def pixels_elsewhere_words(*, has_url: bool, syntax: Optional[str]) -> str:
+    """The refusal for an image whose pixels are held elsewhere (#1097).
+
+    One sentence for ingest's refusal and the export's: ingest refuses a
+    file with no pixel element that names a Pixel Data Provider URL
+    (0028,7FE0) at the top level or is under a JPIP Referenced syntax,
+    and the export fails such an instance a 1.0.x ingest admitted.
+
+    **Never the URL.** A JPIP URL's query carries the image's UIDs, and
+    the row this becomes is kept; the element and the syntax are named
+    by tag and UID only.
+
+    Args:
+        has_url (bool): Whether (0028,7FE0) is present at the top level.
+        syntax (Optional[str]): The transfer syntax UID, or None.
+
+    Returns:
+        str: The sentence.
+    """
+    facts = []
+    if has_url:
+        facts.append("names a Pixel Data Provider URL (0028,7FE0)")
+    name = _JPIP_NAMES.get(str(syntax)) if syntax is not None else None
+    if name is not None:
+        facts.append(f"is under {name} ({syntax})")
+    return (f"Its pixels are held elsewhere: the file has no pixel element "
+            f"and {' and '.join(facts)}, which this library does not fetch, "
+            f"so its pixels cannot be read, redacted or exported.")
+
+
 def _pixels_are_elsewhere(ds) -> bool:
     """Whether a dataset says its pixels exist and are not in the file.
 
@@ -1082,9 +1121,11 @@ def _missing_decoder_words(error, ds) -> Optional[str]:
     Decided from state, never from the failure's message (#623). Two
     cases, and nothing else:
 
-    1. The imagecodecs fallback was asked and imagecodecs did not import:
-       an `imagecodecs_handler.ImagecodecsUnavailable` in the failure's
-       cause chain.
+    1. The imagecodecs fallback was asked and imagecodecs did not
+       import, or imported and the codec module the syntax needs did not
+       load (#1092): an `imagecodecs_handler.ImagecodecsUnavailable` in
+       the failure's cause chain. The advice names the module where the
+       refusal does (`codec_module`).
     2. The failure is a `RuntimeError`, the file's transfer syntax is not
        one the fallback reads, and pydicom's decoder for it reports no
        usable plugin.
@@ -1108,6 +1149,21 @@ def _missing_decoder_words(error, ds) -> Optional[str]:
             # No word of the import failure here: its message can hold
             # an install path (`imagecodecs_handler._unavailable`). The
             # command is how a user reads it.
+            #
+            # imagecodecs imported and one of its codec modules did not
+            # (#1092): the module is named, from the handler's own table
+            # by syntax, and checked as `_unavailable` checks
+            # `ImportError.name`, so only a dotted identifier reaches the
+            # sentence and the command.
+            module = getattr(cause, "codec_module", None)
+            if isinstance(module, str) and module and all(
+                    part.isidentifier() for part in module.split(".")):
+                return (f"imagecodecs imported, and its codec module "
+                        f"imagecodecs.{module} did not load. This library "
+                        f"reads this transfer syntax with it where pydicom "
+                        f"cannot; reinstall imagecodecs. Running `python -c "
+                        f"\"import imagecodecs.{module}\"` shows the "
+                        f"import's own error.")
             return ("imagecodecs did not import. This library installs it "
                     "and reads this transfer syntax with it where pydicom "
                     "cannot; reinstall imagecodecs. Running `python -c "
@@ -2142,7 +2198,7 @@ class Instance(DicomItem):
                 could not decode. Also from a file, when an encapsulated
                 pixel element's offset table names a different number of
                 frames from NumberOfFrames: `Lazy load failed for instance
-                <uid>: RuntimeError: <table> names N frames;
+                <uid>: RuntimeError: <table> names N frame(s);
                 NumberOfFrames declares M`. The message names the
                 instance, never the source file. Also from a file that
                 ingest would refuse, in ingest's words. Such a file has a
@@ -2407,7 +2463,10 @@ class Instance(DicomItem):
                     # `_pixels_are_elsewhere`, so a dataset with no pixel
                     # element that names a Pixel Data Provider URL under a
                     # syntax pydicom decodes reads as None here, as it did
-                    # before #1093 (kept as it was; not judged right).
+                    # before #1093. Since #1097 ingest refuses such a file
+                    # (`io_handlers._refuse_pixels_held_elsewhere`), and
+                    # the export fails one an older store holds, after
+                    # this read answers None; the read itself is kept.
                     # With no dataset -- `dcmread` itself raised one of
                     # these two classes -- this one returns None and the
                     # next raises. That too is as it was, deliberately at
@@ -2587,7 +2646,7 @@ class Instance(DicomItem):
     def _write_str_if_changed(self, tag: str, value: str) -> bool:
         """Write a string descriptor only when it actually differs.
 
-        Compared stripped and case-insensitively. Call only while holding
+        Compared by `pixel_geometry._cs_spelling` (#1084). Call only while holding
         `PIXEL_STATE_LOCK`.
 
         Args:
@@ -2598,7 +2657,15 @@ class Instance(DicomItem):
             bool: True when it wrote.
         """
         raw = self.attributes.get(tag)
-        if raw is not None and str(raw).strip().upper() == str(value).strip().upper():
+        # The one Code String spelling (`pixel_geometry._cs_spelling`,
+        # #1084), never a second one: `str.upper()` folds `ß` to `SS`, so
+        # it read two labels the spelling tells apart as one. Text only.
+        # A `bytes` label held compares unequal on purpose: the callers
+        # write the decoder's label because the samples changed, and a
+        # relabel after a conversion is a new label, not a respelling of
+        # one written as held (owner ruling of 2026-10-11).
+        if (isinstance(raw, str) and isinstance(value, str)
+                and _cs_spelling(raw) == _cs_spelling(value)):
             return False
         # `DicomItem.set_attr`: see `_write_int_if_changed`.
         DicomItem.set_attr(self, tag, value)

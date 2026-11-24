@@ -49,25 +49,31 @@ an excess is reported. RLE has no end marker, so `_rle_fragment_frames`
 counts an RLE buffer's fragments as its frames instead, where there are
 more of them than declared frames and every one begins an RLE frame
 header, and `io_handlers._decode_pixels` is told that count so pydicom
-reads them one per frame.
+reads them one per frame. Under NumberOfFrames 1, or absent, pydicom
+does not walk at all: it joins every fragment into one frame. Where each
+fragment is a whole stream of a marker-delimited syntax (start marker to
+end marker), `_whole_stream_fragments` counts the fragments as frames,
+and the decode is told that count too (#1088). A native 1-bit frame
+that is not a whole number of bytes is counted in bits (#1094,
+`_native_excess`).
 
-**Limits.** Two shapes remain uncounted. NumberOfFrames 1, or absent,
-over several fragments with no table **under any syntax but RLE**: the
-walk joins every fragment into one frame, so no excess is visible before
-the decode, and none after it either. And a native 1-bit frame that is
-not a whole number of bytes, where pydicom's own excess arithmetic
-raises rather than return the frames (`_native_excess`).
+**Limits.** NumberOfFrames 1, or absent, over several fragments with no
+table, where the fragments are not each a whole stream: the frames are
+read as one joined frame, and no excess is visible. And whole streams
+under a populated Basic Offset Table that names one frame: the table
+names the frames, and pydicom reads by it.
 """
 # Every caller of the frame count goes through `offset_table_frame_count`,
 # so none of them can disagree about what a mismatch is. Do not add a
 # decode entry point here that skips `_decode_pixels`: it would read files
 # ingest refuses, and a mismatch refusal inside the decoder would turn an
 # excess ingest means to drop into a rejected file.
+import copy
 import struct
 import sys
 from io import BytesIO
 from itertools import islice
-from typing import Optional, Tuple, Union
+from typing import NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 from pydicom.uid import UID
@@ -114,7 +120,7 @@ def is_available():
 
 
 class ImagecodecsUnavailable(RuntimeError):
-    """The fallback was asked to decode and imagecodecs did not import.
+    """The fallback was asked to decode, and imagecodecs or one of its codec modules did not import.
 
     A class of its own so that `Instance.get_pixel_data` can tell a
     missing decoder from a file no decoder reads by what was raised, not
@@ -122,7 +128,17 @@ class ImagecodecsUnavailable(RuntimeError):
     reads (`... could not decode it either: ImagecodecsUnavailable:
     imagecodecs is not available: its import raised ImportError ...`).
     At module level, so it pickles.
+
+    Where imagecodecs imported and the codec module the syntax needs did
+    not (#1092), `codec_module` holds that module's name (`"_ljpeg"`), and
+    `entities._missing_decoder_words` names it in its advice. It is set
+    as an attribute, so it rides `BaseException.__reduce__`'s `__dict__`
+    through a pickle with the message.
     """
+
+    #: The imagecodecs extension module that did not load, from
+    #: `CODEC_MODULES`, or None when imagecodecs itself did not import.
+    codec_module = None
 
 
 def _unavailable() -> ImagecodecsUnavailable:
@@ -220,6 +236,46 @@ SUPPORTED_TRANSFER_SYNTAXES = [
 ]
 
 
+#: The imagecodecs extension module each `SUPPORTED_TRANSFER_SYNTAXES`
+#: member is decoded with, by `_decode_frame`'s arm for it (#1092). This
+#: library's own table, read by syntax: never parsed out of an error's
+#: message (#623) and never read from imagecodecs' private `_ATTRIBUTES`
+#: (a test holds the two together). JPEG Baseline and Extended go
+#: through `imagecodecs.jpeg_decode`, a Python function that calls
+#: `jpeg8_decode`; its `ljpeg_decode` retry runs under
+#: `contextlib.suppress`, so `_jpeg8` is the one module that can fail it.
+CODEC_MODULES = {
+    JPEGLossless: "_ljpeg",
+    JPEGLosslessSV1: "_ljpeg",
+    JPEGBaseline: "_jpeg8",
+    JPEGExtended: "_jpeg8",
+    JPEGLSLossless: "_jpegls",
+    JPEGLSLossy: "_jpegls",
+    **{syntax: "_jpeg2k" for syntax in J2K_SYNTAXES},
+}
+
+
+def _codec_module_unavailable(transfer_syntax) -> ImagecodecsUnavailable:
+    """The refusal for a codec module that did not load, naming it (#1092).
+
+    Raise it `from None`, as `_unavailable()` is raised: the loader's
+    own error, which `DelayedImportError` chains, can name an install
+    path.
+
+    Args:
+        transfer_syntax (UID): The syntax being decoded.
+
+    Returns:
+        ImagecodecsUnavailable: With `codec_module` set.
+    """
+    module = CODEC_MODULES[transfer_syntax]
+    refusal = ImagecodecsUnavailable(
+        f"imagecodecs is not available: its codec module "
+        f"imagecodecs.{module} did not load")
+    refusal.codec_module = module
+    return refusal
+
+
 def supports_transfer_syntax(transfer_syntax):
     """Whether this handler decodes the transfer syntax.
 
@@ -235,8 +291,9 @@ def supports_transfer_syntax(transfer_syntax):
 #: What `offset_table_frame_count` returns: ``(table_frames,
 #: declared_frames, declared_raw, table_name)``. ``declared_raw`` is
 #: NumberOfFrames as the file states it -- an int, ``""`` when the element
-#: is present and empty, None when it is absent.
-FrameCount = Tuple[int, int, Optional[Union[int, str]], str]
+#: is present and empty, None when it is absent. ``table_name`` is a
+#: string, or a `NativeBits` or `WholeStreams` marker.
+FrameCount = Tuple[int, int, Optional[Union[int, str]], Union[str, tuple]]
 
 
 def extended_offsets(ds) -> Optional[Tuple[bytes, bytes]]:
@@ -352,6 +409,106 @@ def ragged_offset_table_words(ds) -> Optional[str]:
             f"{'byte' if length == 1 else 'bytes'} long, "
             f"which is not a whole number of 8-byte offsets, so it names no "
             f"whole number of frames.")
+
+
+def _lengths_not_stated(ds) -> Optional[Tuple[bytes, str]]:
+    """``(table, "empty" | "absent")`` for a table whose Lengths pydicom fails on.
+
+    An encapsulated file whose Extended Offset Table holds bytes beside
+    an Extended Offset Table Lengths element that is absent, or holds no
+    value (a zero-length element read from a file is None). pydicom's
+    decoder takes the table whenever it is present and fails on such a
+    Lengths element in CPython's words (`TypeError: object of type
+    'NoneType' has no len()`, `AttributeError: ... no attribute
+    'ExtendedOffsetTableLengths'`). A Lengths element holding bytes of
+    any length is not this shape: pydicom walks by it, or drops the table
+    and reads on (`_drops_the_table`), and so does a `b""` set in memory.
+    None otherwise. Never raises.
+    """
+    try:
+        if not ds.file_meta.TransferSyntaxUID.is_encapsulated:
+            return None
+        if "ExtendedOffsetTable" not in ds:
+            return None
+        table = ds.get("ExtendedOffsetTable")
+        table = getattr(table, "value", table)
+        if not isinstance(table, (bytes, bytearray)) or not table:
+            return None
+        if "ExtendedOffsetTableLengths" not in ds:
+            return bytes(table), "absent"
+        lengths = ds.get("ExtendedOffsetTableLengths")
+        lengths = getattr(lengths, "value", lengths)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return (bytes(table), "empty") if lengths is None else None
+
+
+def missing_lengths_words(ds) -> Optional[str]:
+    """The refusal for an Extended Offset Table with no Lengths to read it by (#1086).
+
+    The file stays refused (owner ruling of 2026-11-22, Q14): pydicom
+    fails on it, and reading it without the table would put frames into
+    the export from a table the file says to read them by. Only the
+    words change, from CPython's to a sentence naming both elements
+    (`_lengths_not_stated`). Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Returns:
+        Optional[str]: One sentence of numbers and element names, for the
+        `RuntimeError` `io_handlers._decode_pixels` raises, or None: not
+        this shape, or a header pydicom refuses for another element,
+        which keeps pydicom's sentence naming that element
+        (`validate_without_the_table`). Where pydicom cannot be asked,
+        this sentence is said: withheld, the row would be CPython's.
+    """
+    shape = _lengths_not_stated(ds)
+    if shape is None:
+        return None
+    # Asked without the two table elements: pydicom's own validation fails
+    # on this very Lengths element, so asked of `ds` it would always
+    # answer "refused" and this sentence would never be said.
+    if (_header_verdict(ds, without_extended_offset_table=True)
+            == HEADER_REFUSED):
+        return None
+    table, lengths = shape
+    if len(table) % 8:
+        named = f"is {len(table)} bytes long"
+    else:
+        count = len(table) // 8
+        named = f"names {count} frame{'' if count == 1 else 's'}"
+    held = ("there is no Extended Offset Table Lengths (7FE0,0002)"
+            if lengths == "absent"
+            else "its Extended Offset Table Lengths (7FE0,0002) is empty")
+    return (f"Extended Offset Table (7FE0,0001) {named}, and {held}, so no "
+            f"frame's length is stated and the frames cannot be read by the "
+            f"table.")
+
+
+def validate_without_the_table(ds) -> None:
+    """Raise pydicom's own refusal of the header, asked without the table.
+
+    For a file of `_lengths_not_stated`'s shape whose header pydicom
+    refuses for another element: the decode would fail on the Lengths
+    element first, in CPython's words, so `io_handlers._decode_pixels`
+    asks pydicom's validation here, on a copy without the two table
+    elements, and lets its exception go, in its class and its words,
+    which name the element. Returns without raising where pydicom
+    accepts the copy, or for any other file.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Raises:
+        AttributeError: A required element is missing, in pydicom's words.
+        ValueError: An element's value is invalid, in pydicom's words.
+    """
+    if _lengths_not_stated(ds) is None:
+        return
+    runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
+    runner.set_source(_without_the_table(ds))
+    runner._validate_options()  # pylint: disable=protected-access
 
 
 def offset_table_frame_count(ds) -> Optional[FrameCount]:
@@ -481,7 +638,29 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
             return None
         counted = (len(eot_bytes) // 8, declared, declared_raw,
                    "Extended Offset Table")
-        if walked_by or counted[0] > declared:
+        if walked_by:
+            return counted
+        if counted[0] > declared:
+            # **Except over a Basic Offset Table naming fewer** (#1067).
+            # pydicom drops the table and, where the Basic Offset Table
+            # is populated, reads by that, not by a walk: it is what
+            # describes the frames the decoder reads, and naming fewer
+            # than declared it runs out. Counted by it, the file is
+            # refused in the count's words; counted by the dropped table,
+            # it was decoded, and refused in a sentence saying it had no
+            # offset table. Only that direction: over a Basic Offset Table
+            # naming as many as declared or more, the dropped table's row
+            # stands (a graded row would vanish or change its subject),
+            # and over an empty one the table's count is the #621 guard
+            # (under NumberOfFrames 1 the walk loses frame 1 in silence).
+            if _drops_the_table(ds):
+                try:
+                    basic = parse_basic_offsets(ds.PixelData)
+                except Exception:  # pylint: disable=broad-except
+                    basic = None
+                if basic and len(basic) < declared:
+                    return (len(basic), declared, declared_raw,
+                            "Basic Offset Table")
             return counted
         if not _drops_the_table(ds):
             if counted[0] < declared:
@@ -505,6 +684,13 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
         fragments = _rle_fragment_frames(ds, declared)
         if fragments is not None:
             return (fragments, declared, declared_raw, RLE_FRAGMENTS)
+        # Whole codestreams under one declared frame (#1088), before the
+        # walk, which does not run under one: pydicom joins the fragments
+        # and decodes the first stream, so the others were lost with no
+        # row.
+        whole = _whole_stream_fragments(ds, declared)
+        if whole is not None:
+            return (whole[0], declared, declared_raw, whole[1])
         return _walked_excess(ds, declared, declared_raw)
     return (len(offsets), declared, declared_raw, "Basic Offset Table")
 
@@ -658,6 +844,155 @@ NATIVE_FRAMES = "Pixel Data's length"
 RLE_FRAGMENTS = "RLE fragments"
 
 
+class WholeStreams(NamedTuple):
+    """The marker for fragments counted as whole codestreams (#1088).
+
+    Carries the stream's name for the row ("JPEG 2000 codestream", "JPEG
+    stream", "JPEG-LS stream"). A module-level class, so a count pickles
+    across `ingest_worker`'s process boundary in `meta`.
+    """
+
+    stream: str
+
+
+def read_one_per_fragment(table_name) -> bool:
+    """Is this count's every fragment one frame, which the decode must be told?
+
+    True for `RLE_FRAGMENTS` and a `WholeStreams` marker. pydicom joins
+    such fragments into one frame unless it is handed their count as
+    `number_of_frames`, so `ingest_worker` and `_decode_nested_pixels`
+    pass it, and `io_handlers._decode_pixels` keeps the declared frames.
+
+    Args:
+        table_name: The fourth member of a `FrameCount`.
+
+    Returns:
+        bool: Whether the decode reads one frame per fragment.
+    """
+    return table_name == RLE_FRAGMENTS or isinstance(table_name, WholeStreams)
+
+
+#: The start of a whole stream, by syntax: SOC then SIZ for a JPEG 2000
+#: (and HTJ2K) codestream, SOI for a T.81 or JPEG-LS stream. Each ends
+#: with `_STREAM_END` (EOC, or EOI, both FFD9).
+_STREAM_END = b"\xff\xd9"
+
+
+def _stream_start(transfer_syntax) -> Optional[Tuple[bytes, str]]:
+    """The start marker and name of a whole stream under this syntax, or None."""
+    if transfer_syntax in J2K_SYNTAXES:
+        return b"\xff\x4f\xff\x51", "JPEG 2000 codestream"
+    if transfer_syntax in T81_SYNTAXES:
+        return b"\xff\xd8", "JPEG stream"
+    if transfer_syntax in JPEGLS_SYNTAXES:
+        return b"\xff\xd8", "JPEG-LS stream"
+    return None
+
+
+def _frame_count_pydicom_refuses(ds) -> bool:
+    """Does this dataset hold a NumberOfFrames pydicom's decoder refuses?
+
+    A negative or non-integer value, or `''` set in memory. Absent, 0 and
+    one holding no value in a file (None) are not refused: pydicom reads
+    each as one frame (`declared_frame_count`). Never raises.
+    """
+    if "NumberOfFrames" not in ds:
+        return False
+    value = ds.NumberOfFrames
+    if value is None:
+        return False
+    if value == "":
+        return True
+    try:
+        return int(value) < 0
+    except (TypeError, ValueError):
+        return True
+
+
+def _whole_stream_fragments(ds, declared) -> Optional[Tuple[int, WholeStreams]]:
+    """Fragments that are each a whole stream, under one declared frame, or None.
+
+    Asked only where no offset table names the frames and the buffer is
+    not RLE. Counts only under one declared frame (NumberOfFrames 1,
+    absent or 0: pydicom walks the fragments under two or more, and
+    `_walked_excess` counts that walk; never a NumberOfFrames pydicom
+    refuses, `_frame_count_pydicom_refuses`), for a marker-delimited syntax
+    (`_stream_start`), when there are more fragments than declared and
+    **every** fragment begins with the stream's start marker and ends
+    with its end marker once trailing `0x00` padding is stripped.
+
+    Args:
+        ds (pydicom.Dataset): The dataset.
+        declared (int): The declared frames (`declared_frame_count`).
+
+    Returns:
+        Optional[Tuple[int, WholeStreams]]: The fragment count and the
+        marker naming the stream, or None -- also for a buffer that cannot
+        be parsed (the decoder that runs next refuses it).
+    """
+    # Both ends of every fragment, never one: a frame split across
+    # fragments has a first fragment with no end marker and later ones
+    # with no start marker, and pydicom joins and decodes such a frame
+    # correctly, so a count here would turn a readable file into a row
+    # and a lost image. FFD9 at a fragment's end is a marker: JPEG
+    # entropy data stuffs every FF with 00, and in a JPEG 2000 codestream
+    # FF is never followed by a byte above 0x8F inside packet data. The
+    # nine multi-fragment single-frame files of the fingerprint's cohort
+    # are split frames, and the test is false for every one.
+    #
+    # A populated Basic Offset Table naming one frame over such fragments
+    # is not asked: the table names the frames, and pydicom reads by it.
+    #
+    # **Never over a NumberOfFrames pydicom refuses** (review of X7,
+    # finding 1). The count is handed to the decode as `number_of_frames`,
+    # which overrides the element in pydicom's own validation, so a count
+    # here would admit a file pydicom refuses. Worse, the signed JPEG 2000
+    # refusal withholds its sentence for that refusal (#1085), so two whole
+    # signed codestreams under NumberOfFrames -1 reached Pillow and were
+    # stored shifted by 2**15. Declined, the decode raises pydicom's
+    # sentence naming the element, as it did before this count existed.
+    if declared != 1 or _frame_count_pydicom_refuses(ds):
+        return None
+    try:
+        start = _stream_start(ds.file_meta.TransferSyntaxUID)
+    except (AttributeError, ValueError):
+        return None
+    if start is None:
+        return None
+    marker, name = start
+    try:
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        fragments, _offsets = parse_fragments(buf)
+        if fragments <= declared:
+            return None
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        for fragment in generate_fragments(buf):
+            fragment = bytes(fragment)
+            if not (fragment.startswith(marker)
+                    and fragment.rstrip(b"\0").endswith(_STREAM_END)):
+                return None
+    except Exception:  # pylint: disable=broad-except
+        # Not this check's refusal to make: the decoder that runs next
+        # meets the same buffer and refuses it in its own words.
+        return None
+    return fragments, WholeStreams(name)
+
+
+class NativeBits(NamedTuple):
+    """The marker for a native 1-bit element counted in bits (#1094).
+
+    Where every other marker is a string, this one carries the two
+    numbers its row names and the count tuple has no slot for: the bytes
+    held and the bits in one frame. A module-level class, so a count
+    pickles across `ingest_worker`'s process boundary in `meta`.
+    """
+
+    held: int
+    frame_bits: int
+
+
 def _walked_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     """The frames pydicom's walk finds beyond NumberOfFrames, or None.
 
@@ -729,33 +1064,185 @@ def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
         declared_raw: NumberOfFrames as the file states it.
 
     Returns:
-        Optional[FrameCount]: The count, named `NATIVE_FRAMES`, or None
-        when pydicom would not return an excess: no more whole frames
-        than declared; a frame length that is not a whole number of bytes
-        (a 1-bit frame such as 3x5, where pydicom's own excess arithmetic
-        raises `TypeError`); `YBR_FULL_422`, whose longer buffer pydicom
+        Optional[FrameCount]: The count, named `NATIVE_FRAMES`, or, for
+        a 1-bit frame that is not a whole number of bytes (3x3 is nine
+        bits), named by a `NativeBits` marker and counted in bits (#1094).
+        None when pydicom would not return an excess: no more whole
+        frames than declared; `YBR_FULL_422`, whose longer buffer pydicom
         reads as a wrong label rather than as frames; a NumberOfFrames
-        pydicom refuses (negative, or empty); or a dataset pydicom cannot
-        set up a runner for, which the decode that follows refuses.
+        pydicom refuses (negative, or `''` set in memory; one holding no
+        value in a file is read as 1, as pydicom reads it, for the bits
+        arm only); or a dataset pydicom cannot set up a runner for, which
+        the decode that follows refuses.
     """
-    if not (declared_raw is None or isinstance(declared_raw, int)
-            and declared_raw >= 0):
+    # The bits arm reads a NumberOfFrames holding no value as 1: from a
+    # file that is None, and pydicom reads it as one frame
+    # (`declared_frame_count`). `''` set in memory pydicom refuses, in
+    # its words. The byte arm still declines both; changing that would
+    # move rows this change is not about.
+    from_file_empty = (declared_raw == ""
+                       and ds.get("NumberOfFrames", "") is None)
+    if not (declared_raw is None or from_file_empty
+            or isinstance(declared_raw, int) and declared_raw >= 0):
         return None
     try:
         runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
         runner.set_source(ds)
         frame_length = runner.frame_length(unit="bytes")
-        if (not isinstance(frame_length, int) or frame_length <= 0
-                or runner.photometric_interpretation == "YBR_FULL_422"):
+        if runner.photometric_interpretation == "YBR_FULL_422":
             return None
         actual = len(ds.PixelData)
+        # At one bit per sample a frame's bits are its samples: pydicom's
+        # "pixels" unit is rows x columns x samples per pixel.
+        frame_bits = runner.frame_length(unit="pixels")
+        one_bit = runner.bits_allocated == 1
     except Exception:  # pylint: disable=broad-except
+        return None
+    if (one_bit and isinstance(frame_bits, int) and frame_bits > 0
+            and frame_bits % 8):
+        # pydicom's own rule in bits, as `bit_packed_excess_words`
+        # reads it: integer arithmetic where pydicom floor-divides by a
+        # float number of bytes, the same quotient with nothing to round.
+        need = -(-frame_bits * declared // 8)
+        room = actual * 8 // frame_bits
+        if actual > need + need % 2 and room > declared:
+            return (room, declared, declared_raw,
+                    NativeBits(held=actual, frame_bits=frame_bits))
+        return None
+    if (from_file_empty or not isinstance(frame_length, int)
+            or frame_length <= 0):
         return None
     expected = frame_length * declared
     whole = actual // frame_length
     if actual > expected + expected % 2 and whole > declared:
         return (whole, declared, declared_raw, NATIVE_FRAMES)
     return None
+
+
+def native_trailing_words(ds) -> Optional[str]:
+    """The row for native bytes beyond the declared frames that are no frame (#1090).
+
+    pydicom's rule for a native element, as `_native_excess` reads it,
+    the other way round: the declared frames need ``need`` bytes (in
+    bits for a 1-bit frame, rounded up), and one more byte is the pad an
+    odd length takes (PS3.5 7.1.1). Bytes held past that which do not
+    make one more whole frame are dropped by the decode, and the export
+    has no place for them. A whole further frame is `_native_excess`'
+    row, never this one too. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset.
+
+    Returns:
+        Optional[str]: One sentence naming the bytes held and the bytes
+        the declared frames need, or None: an encapsulated or unreadable
+        syntax, no `PixelData`, `YBR_FULL_422` (pydicom reads its longer
+        buffer as a wrong label), a NumberOfFrames pydicom refuses, a
+        header pydicom cannot set up a runner for, or no such bytes.
+    """
+    try:
+        if ds.file_meta.TransferSyntaxUID.is_encapsulated:
+            return None
+    except (AttributeError, ValueError):
+        return None
+    if "PixelData" not in ds:
+        return None
+    if _frame_count_pydicom_refuses(ds):
+        return None
+    declared = declared_frame_count(ds)
+    try:
+        runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
+        runner.set_source(ds)
+        if runner.photometric_interpretation == "YBR_FULL_422":
+            return None
+        rows, cols = int(runner.rows), int(runner.columns)
+        samples = int(runner.samples_per_pixel)
+        frame_bits = rows * cols * samples * int(runner.bits_allocated)
+        held = len(ds.PixelData)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if frame_bits <= 0:
+        return None
+    need = -(-frame_bits * declared // 8)
+    if held <= need + need % 2 or held * 8 // frame_bits > declared:
+        return None
+    shape = f"{rows}x{cols}" + (f"x{samples}" if samples > 1 else "")
+    one = declared == 1
+    # One byte beyond is reached only in memory (a written element is
+    # padded to an even length), after an even frame, and said singular.
+    beyond = held - need
+    single = beyond == 1
+    return (f"Pixel Data holds {held} bytes, where the declared {declared} "
+            f"{'frame' if one else 'frames'} of {shape} "
+            f"{'needs' if one else 'need'} {need} (and one pad byte where "
+            f"that is odd): the {beyond} {'byte' if single else 'bytes'} "
+            f"beyond {'it' if one else 'them'} "
+            f"{'is' if single else 'are'} not a frame and "
+            f"{'is' if single else 'are'} not in the exported file.")
+
+
+#: `_header_verdict`'s three answers. `UNASKED` means only that the
+#: question could not be put to pydicom: its runner, or the runner's
+#: `_validate_options`, is not there to ask.
+HEADER_ACCEPTED = "accepted"
+HEADER_REFUSED = "refused"
+HEADER_UNASKED = "unasked"
+
+
+def _without_the_table(ds):
+    """A shallow copy of `ds` without the two Extended Offset Table elements.
+
+    The copy has a dictionary of its own, so removing the two elements
+    from it leaves the caller's dataset as it was; every other element
+    object is shared, and nothing here writes to one. `copy.copy` alone
+    would share pydicom's element dictionary (`Dataset._dict`), and a
+    `Dataset(ds)` does too, so the dictionary is copied by hand, under
+    `setup.py`'s `pydicom<4.0` cap. The encoding attributes a raw element
+    is read by are carried on the copy.
+    """
+    clone = copy.copy(ds)
+    clone._dict = dict(ds._dict)  # pylint: disable=protected-access
+    for tag in (0x7FE00001, 0x7FE00002):
+        clone._dict.pop(tag, None)  # pylint: disable=protected-access
+    return clone
+
+
+def _header_verdict(ds, *, without_extended_offset_table=False) -> str:
+    """pydicom's own validation of the header, as one of three answers.
+
+    `HEADER_REFUSED` for any exception from `set_source` or
+    `_validate_options`, because the decode raises the same;
+    `HEADER_UNASKED` only where the question could not be put: the
+    runner class did not import, or has no `_validate_options`, which is
+    checked before the call, never inferred from an `AttributeError`
+    raised inside it; `HEADER_ACCEPTED` otherwise. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+        without_extended_offset_table (bool): Ask of a copy without the
+            two Extended Offset Table elements (`_without_the_table`).
+            pydicom itself fails on a table whose Lengths element is
+            empty or absent, so asked of the dataset as it stands the
+            answer for such a file is always "refused"; asked without
+            the table, it is about every other element.
+
+    Returns:
+        str: `HEADER_ACCEPTED`, `HEADER_REFUSED` or `HEADER_UNASKED`.
+    """
+    try:
+        from pydicom.pixels.decoders.base import DecodeRunner as runner_class  # pylint: disable=import-outside-toplevel
+    except Exception:  # pylint: disable=broad-except
+        return HEADER_UNASKED
+    if not callable(getattr(runner_class, "_validate_options", None)):
+        return HEADER_UNASKED
+    try:
+        source = _without_the_table(ds) if without_extended_offset_table else ds
+        runner = runner_class(ds.file_meta.TransferSyntaxUID)
+        runner.set_source(source)
+        runner._validate_options()  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        return HEADER_REFUSED
+    return HEADER_ACCEPTED
 
 
 def _pydicom_refuses_the_header(ds) -> bool:
@@ -803,14 +1290,11 @@ def _pydicom_refuses_the_header(ds) -> bool:
     # copy of pydicom's rules is a second answer to "what does pydicom
     # refuse" (the first build of #669 judged a label pydicom does not
     # take, and the second every header it does not).
-    try:
-        from pydicom.pixels.decoders.base import DecodeRunner  # pylint: disable=import-outside-toplevel
-        runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
-        runner.set_source(ds)
-        runner._validate_options()  # pylint: disable=protected-access
-    except Exception:  # pylint: disable=broad-except
-        return True
-    return False
+    #
+    # Unasked counts as refused here: the 1-bit and ragged sentences then
+    # lose only their wording to pydicom's. A refusal whose withholding
+    # would lose more than wording reads `_header_verdict` itself.
+    return _header_verdict(ds) != HEADER_ACCEPTED
 
 
 def bit_packed_excess_words(ds) -> Optional[str]:
@@ -822,14 +1306,15 @@ def bit_packed_excess_words(ds) -> Optional[str]:
     frames, and where that is more than NumberOfFrames it decodes that
     many -- a `float` count here -- and fails in CPython's words for a
     slice (`TypeError: slice indices must be integers ...`), which name
-    nothing in the file (#669). `_native_excess` declines the same shape,
-    so nothing reports it either. Never raises.
+    nothing in the file (#669). Never raises.
 
     That is pydicom's default call. With `allow_excess_frames=False`
-    pydicom reads the declared frames of such a file, and this refuses
-    it all the same: the refusal does not read the keyword. No door
-    passes it for these files, because `_native_excess` reports no
-    excess for them and only a reported excess sets it.
+    pydicom reads the declared frames of such a file, and since #1094
+    `_native_excess` counts that excess in bits, so ingest, an icon and
+    every door that drops an excess keep the declared frames with a
+    `DATA_LOSS` row, and `refusal_before_decode` does not ask this. What
+    is left for it is a decode that keeps every frame: a direct
+    `_decode_pixels(ds)`.
 
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
@@ -911,21 +1396,25 @@ def bit_packed_excess_words(ds) -> Optional[str]:
             f"read as frames.")
 
 
-def refusal_before_decode(ds) -> Optional[str]:
+def refusal_before_decode(ds, *, keeps_every_frame=True) -> Optional[str]:
     """The refusal `io_handlers._decode_pixels` makes before any decoder is asked.
 
     One function, so the door that raises it and the reader that must
     not mistake it for a missing decoder
     (`entities._missing_decoder_words`) ask the same question. Each of
-    the three is about what the file holds, and never raises.
+    the four is about what the file holds, and never raises.
 
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
+        keeps_every_frame (bool): False where the decode drops an excess
+            (`allow_excess_frames=False`). pydicom then reads a native
+            1-bit file's declared frames, so `bit_packed_excess_words`
+            is not asked (#1094); the other three are.
 
     Returns:
         Optional[str]: The first of `signed_codestream_refusal`,
-        `bit_packed_excess_words` and `ragged_offset_table_words` that
-        answers, or None.
+        `bit_packed_excess_words`, `ragged_offset_table_words` and
+        `missing_lengths_words` that answers, or None.
     """
     # Signedness first, as it was when `_decode_pixels` asked the three
     # in turn: Pillow decodes a signed codestream under
@@ -934,8 +1423,9 @@ def refusal_before_decode(ds) -> Optional[str]:
     # carry that shape (the writer derives PixelRepresentation and the
     # codestream's sign from one dtype), so the readback never trips it.
     return (signed_codestream_refusal(ds)
-            or bit_packed_excess_words(ds)
-            or ragged_offset_table_words(ds))
+            or (bit_packed_excess_words(ds) if keeps_every_frame else None)
+            or ragged_offset_table_words(ds)
+            or missing_lengths_words(ds))
 
 
 def frame_count_mismatch(ds) -> Optional[str]:
@@ -999,16 +1489,35 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
     # the row says only that: there is no end marker it was found by.
     # Spelled out rather than taken from `RLE_FRAGMENTS`, which is the
     # marker and not the phrase.
-    if table_name == RLE_FRAGMENTS:
-        counted_words = (f"{WALKED_FRAMES} hold {table_frames} frames, "
-                         f"one per fragment")
+    #
+    # "1 frame", never "1 frames" (#1087), for every subject.
+    frames = f"{table_frames} frame{'' if table_frames == 1 else 's'}"
+    if isinstance(table_name, NativeBits):
+        # In bits, because a frame here is not a whole number of bytes,
+        # and with what the declared frames need, which is the number
+        # the bytes held are measured against (#1094). A NumberOfFrames
+        # holding no value is counted only from a file, where pydicom
+        # reads it as 1, so here it is "read as 1".
+        held, bits = table_name
+        need = -(-bits * declared // 8)
+        if declared_raw == "":
+            declared_words = f"NumberOfFrames is empty (read as {declared})"
+        return (f"Pixel Data holds {held} bytes, room for {frames} of "
+                f"{bits} {'bit' if bits == 1 else 'bits'}; {declared_words}, "
+                f"which {'needs' if declared == 1 else 'need'} {need} "
+                f"{'byte' if need == 1 else 'bytes'}")
+    if isinstance(table_name, WholeStreams):
+        counted_words = (f"{WALKED_FRAMES} hold {frames}, one whole "
+                         f"{table_name.stream} per fragment")
+    elif table_name == RLE_FRAGMENTS:
+        counted_words = f"{WALKED_FRAMES} hold {frames}, one per fragment"
     elif table_name == WALKED_FRAMES:
-        counted_words = (f"{table_name} hold {table_frames} frames by "
-                         f"their end markers")
+        counted_words = f"{table_name} hold {frames} by their end markers"
     elif table_name == NATIVE_FRAMES:
-        counted_words = f"{table_name} holds {table_frames} whole frames"
+        counted_words = (f"{table_name} holds {table_frames} whole "
+                         f"frame{'' if table_frames == 1 else 's'}")
     else:
-        counted_words = f"{table_name} names {table_frames} frames"
+        counted_words = f"{table_name} names {frames}"
     return f"{counted_words}; {declared_words}"
 
 
@@ -1687,15 +2196,25 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     try:
         if int(ds.PixelRepresentation) != 0:
             return None
+        signed = None
         for frame in _declared_frames(ds):
             layout = _j2k_sample_layout(frame)
             if layout is not None and layout[0]:
-                return signed_codestream_words(layout[1])
+                signed = signed_codestream_words(layout[1])
+                break
     except Exception:  # pylint: disable=broad-except
         # Not this gate's refusal to make: see the comment at the top of
         # this function (the decoder that runs next refuses it).
         return None
-    return None
+    # **Withheld only where pydicom refuses the header** (#1085), so its
+    # sentence naming the element is the one given, as for the 1-bit and
+    # ragged refusals; the decode that follows raises it. **Not where it
+    # could not be asked** (`HEADER_UNASKED`): those two lose only their
+    # wording then, but withholding this one would hand the file to
+    # Pillow, which shifts its samples with no error. Fail closed.
+    if signed is not None and _header_verdict(ds) == HEADER_REFUSED:
+        return None
+    return signed
 
 
 def _decode_frame(transfer_syntax, bitstream, ds, beyond=None):
@@ -1846,7 +2365,7 @@ def _masked_beyond_precision(raw, ds, precision, width, beyond):
                   width=width or int(getattr(ds, "BitsStored", 0) or 0))
 
 
-def decode_declared_frames(ds, number_of_frames, beyond=None):
+def decode_declared_frames(ds, number_of_frames, beyond=None, held=None):
     """Decode the first `number_of_frames` frames, and ask nothing else.
 
     For `io_handlers._decode_pixels`' fallback. **It does not compare
@@ -1858,6 +2377,9 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
         number_of_frames (int): How many frames to decode, from the first.
         beyond (dict, optional): Handed to every frame's `_decode_frame`
             (#682).
+        held (int, optional): The frames the buffer holds one per fragment
+            (`read_one_per_fragment`), walked by so that each fragment is
+            a frame (#1088); the first `number_of_frames` are decoded.
 
     Returns:
         np.ndarray: the frame for one, the frames stacked for more. The
@@ -1880,10 +2402,29 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
     if not is_available():
         raise _unavailable() from None
     transfer_syntax = ds.file_meta.TransferSyntaxUID
-    frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
-              for bitstream in islice(
-                  generate_frames(ds.PixelData,
-                                  number_of_frames=number_of_frames,
-                                  extended_offsets=extended_offsets(ds)),
-                  number_of_frames)]
+    # imagecodecs imports its codec modules lazily, at the first call of
+    # a codec function, and a module that cannot load (a missing shared
+    # library) raises `DelayedImportError`, an `ImportError`, from that
+    # call. It is the installation at fault, not the file, so it gets
+    # the installation's refusal (#1092). Read with `getattr`, and used
+    # only when it is an exception class: a test may set `imagecodecs` to
+    # a mock, whose attribute is no class, and an `except` naming one
+    # raises `TypeError` in place of the codec's own error.
+    delayed = getattr(imagecodecs, "DelayedImportError", None)
+    if not (isinstance(delayed, type) and issubclass(delayed, BaseException)):
+        delayed = ()
+    try:
+        frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
+                  for bitstream in islice(
+                      # `held`, not the declared count, for whole
+                      # streams: under one declared frame the generator
+                      # joins every fragment into one buffer (#1088).
+                      generate_frames(ds.PixelData,
+                                      number_of_frames=held or number_of_frames,
+                                      extended_offsets=extended_offsets(ds)),
+                      number_of_frames)]
+    except delayed:
+        if transfer_syntax not in CODEC_MODULES:
+            raise
+        raise _codec_module_unavailable(transfer_syntax) from None
     return frames[0] if number_of_frames == 1 else np.stack(frames)

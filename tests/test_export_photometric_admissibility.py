@@ -247,7 +247,12 @@ def test_a_monochrome_export_warns_about_nothing(tmp_path, label):
 
 @pytest.mark.parametrize("label", ["YBR_ICT", "YBR_RCT"])
 def test_ict_and_rct_under_jpeg_2000_warn_about_nothing(tmp_path, label):
-    """JPEG 2000 admits both labels, and #516 keeps them (#502, #490).
+    """JPEG 2000 writes both labels `YBR_RCT`, and warns about neither
+    (#502, #490, #1080).
+
+    Since #1080 the J2K row admits `YBR_RCT` alone, and the encoder
+    writes a `YBR_ICT` source `YBR_RCT`, so the label judged is the one
+    written. What follows is the history this replaced.
 
     Measured on f3eee9f: a source already labelled `YBR_RCT`/`YBR_ICT`
     is encoded with the multiple-component transform and keeps its label,
@@ -265,7 +270,7 @@ def test_ict_and_rct_under_jpeg_2000_warn_about_nothing(tmp_path, label):
     assert outcome.ok, outcome.error
     ds = pydicom.dcmread(outcome.output_path)
     assert ds.file_meta.TransferSyntaxUID == J2K_LOSSLESS
-    assert ds.PhotometricInterpretation == label
+    assert ds.PhotometricInterpretation == "YBR_RCT"
     assert outcome.warnings == [], outcome.warnings
 
 
@@ -2550,6 +2555,12 @@ def test_a_files_own_bytes_label_is_exported_as_held(tmp_path, monkeypatch,
 
     Threads, so the worker's notes would reach `caplog`. Killing
     mutation (b1): the writer respelling a `bytes` label as its text.
+
+    Since #1082 the `icon` door exports no icon: ingest cannot decode an
+    icon under a `bytes` label, so the item holds no Pixel Data, and an
+    icon item without its pixels is removed from the export with its
+    row. The graph keeps the label as held; the file holds no `rgb ` and
+    no `RGB `. The `nopix` door is where the written label is judged.
     """
     for name in _LEVERS:
         monkeypatch.delenv(name, raising=False)
@@ -2572,10 +2583,14 @@ def test_a_files_own_bytes_label_is_exported_as_held(tmp_path, monkeypatch,
     written = list((tmp_path / "out").rglob("*.dcm"))
     assert len(written) == 1, written
     exported = pydicom.dcmread(str(written[0]))
-    item = exported if door == "nopix" else exported.IconImageSequence[0]
-    assert item.get_item(0x00280004).value in ("rgb", "rgb ", b"rgb ")
     raw = written[0].read_bytes()
-    assert raw.count(b"rgb ") == 1 and b"RGB " not in raw
+    if door == "icon":
+        assert "IconImageSequence" not in exported
+        assert b"rgb " not in raw and b"RGB " not in raw
+    else:
+        assert exported.get_item(0x00280004).value in (
+            "rgb", "rgb ", b"rgb ")
+        assert raw.count(b"rgb ") == 1 and b"RGB " not in raw
     assert [r.getMessage() for r in caplog.records
             if "is not a defined Code String spelling" in r.getMessage()] \
         == []

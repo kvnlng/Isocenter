@@ -601,10 +601,37 @@ def test_the_one_file_holding_the_url_that_moves_spelled_the_words(tmp_path):
     assert got is None
 
 
+@pytest.fixture
+def admitted_as_1_0(monkeypatch):
+    """Ingest as 1.0.x did, before #1097 refused these files at ingest.
+
+    Ingest runs on the session's spawned pool, which a monkeypatch does
+    not reach, so the pool is swapped for one thread in this process
+    (`support.decode_doors.pydicom_cannot` does the same) and the
+    refusal is made a no-op there: the store then holds what a 1.0.x
+    store holds, and what follows is what 1.1 does with it.
+    """
+    import concurrent.futures  # pylint: disable=import-outside-toplevel
+    from contextlib import contextmanager  # pylint: disable=import-outside-toplevel
+    from isocenter import io_handlers  # pylint: disable=import-outside-toplevel
+
+    @contextmanager
+    def in_process(_session):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            yield pool
+    monkeypatch.setattr(DicomSession, "_ingest_executor", in_process)
+    monkeypatch.setattr(io_handlers, "_refuse_pixels_held_elsewhere",
+                        lambda _ds: None)
+
+
 @pytest.mark.parametrize("ts", JPIP[:2] + [MPEG2])
 def test_an_image_whose_pixels_are_elsewhere_is_not_exported_without_them(
-        tmp_path, ts):
+        tmp_path, ts, admitted_as_1_0):  # pylint: disable=redefined-outer-name,unused-argument
     """`export()` fails the instance, with its row, and the grade says so.
+
+    Since #1097 ingest refuses such a file; this is a store a 1.0.x
+    ingest filled (`admitted_as_1_0`). The read door names the syntax
+    first, so the row is unchanged.
 
     Red on 0a5bc8ac: the file was written with the URL and no pixels,
     `(0012,0062) YES`, no row, graded PASS. For MPEG2 it is the URL
@@ -638,8 +665,11 @@ def test_an_image_whose_pixels_are_elsewhere_is_not_exported_without_them(
 @pytest.mark.parametrize("ts, raises", [(JPIP[0], True), (JPIP[1], True),
                                         (MPEG2, False)])
 def test_redact_does_not_pass_over_an_image_whose_pixels_are_elsewhere(
-        tmp_path, ts, raises):
+        tmp_path, ts, raises, admitted_as_1_0):  # pylint: disable=redefined-outer-name,unused-argument
     """A matching zone that was never applied is a failure, not a 0.
+
+    In a store a 1.0.x ingest filled (`admitted_as_1_0`): since #1097
+    ingest refuses the two JPIP files.
 
     Red on 0a5bc8ac for the two JPIP syntaxes: `redact()` returned 0
     with no row. The control is the MPEG2 header with no URL, which has

@@ -106,7 +106,8 @@ from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
                        iter_item_tree, PhiStatus, _python_value,
-                       _one_tag_of)
+                       _one_tag_of, _holds_a_pixel_element,
+                       _pixels_are_elsewhere, pixels_elsewhere_words)
 from . import entities
 from .uids import generated_uid
 from .reversibility import ReversibilityService
@@ -130,7 +131,7 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  RLE_FRAGMENTS, T81_SYNTAXES,
+                                  T81_SYNTAXES,
                                   _j2k_irreversible,
                                   _jpeg_frame_type, _sign_extend,
                                   _jpegls_near, _stream_precision,
@@ -139,8 +140,11 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   decode_declared_frames, extended_offsets,
                                   frame_precisions,
                                   frame_count_mismatch_words,
+                                  native_trailing_words,
                                   offset_table_frame_count,
-                                  refusal_before_decode)
+                                  read_one_per_fragment,
+                                  refusal_before_decode,
+                                  validate_without_the_table)
 from .parallel import (run_parallel, _resolve_strategy,
                        new_spawn_process_pool)
 from .validation import IODValidator
@@ -444,13 +448,13 @@ class _PhotometricRefusal(RuntimeError):
 #: here is judged inadmissible: a label a syntax does not define is
 #: exactly what this is about.
 #:
-#: **One deliberate widening, because a strict table would fail this
-#: library's own output:** `YBR_ICT` is admitted under JPEG 2000
-#: *lossless* alongside `YBR_RCT`, though `level=0` is the reversible
-#: transform. A source already labelled `YBR_ICT`/`YBR_RCT` is encoded
-#: with the transform and keeps its label, so a table admitting only
-#: `YBR_RCT` would warn about, and refuse, files this exporter writes on
-#: purpose.
+#: JPEG 2000 *Lossless* admits `YBR_RCT` and not `YBR_ICT`: its
+#: codestream is reversible, and `YBR_ICT` names the irreversible
+#: transform (PS3.5 8.2.4). Since #1080 this exporter writes every frame
+#: it encodes with the transform as `YBR_RCT`, a `YBR_ICT` source
+#: included (`_j2k_written_label`), so the strict row no longer refuses
+#: its own output. Until then a `YBR_ICT` source kept its label over a
+#: reversible codestream, and this row admitted it.
 #:
 #: `YBR_PARTIAL_422`/`YBR_PARTIAL_420` are not admitted under JPEG 2000:
 #: the codestream holds full-sample components and PS3.5 A.4.4 gives no
@@ -476,8 +480,7 @@ _ADMISSIBLE_PHOTOMETRICS = {
     "1.2.840.10008.1.2": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.1": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.2": _PHOTOMETRIC_ANY_SYNTAX,
-    "1.2.840.10008.1.2.4.90": _PHOTOMETRIC_ANY_SYNTAX | {
-        "YBR_ICT", "YBR_RCT"},
+    "1.2.840.10008.1.2.4.90": _PHOTOMETRIC_ANY_SYNTAX | {"YBR_RCT"},
 }
 
 #: Why a label the written syntax does not admit is inadmissible, and
@@ -490,7 +493,18 @@ _ADMISSIBLE_PHOTOMETRICS = {
 #: name, and does nothing at all for the subsampled ones -- so a single
 #: shared sentence would be false for two of the four.
 _PHOTOMETRIC_INADMISSIBLE = {
+    # Two entries since #1080, one clause: compressing applies the
+    # reversible transform, which `YBR_RCT` names, so for `YBR_ICT` the
+    # remedy says the file is then labelled `YBR_RCT`, and for `YBR_RCT`
+    # it is true as it stood.
     "YBR_ICT": (
+        "these two labels name the irreversible and reversible "
+        "multiple-component transforms of a JPEG 2000 codestream, and "
+        "uncompressed pixel data has no codestream to carry one.",
+        "Export with use_compression=True, where the reversible transform "
+        "is applied and the file is labelled YBR_RCT, or declare the label "
+        "these bytes have with set_attr(\"0028,0004\", ...)."),
+    "YBR_RCT": (
         "these two labels name the irreversible and reversible "
         "multiple-component transforms of a JPEG 2000 codestream, and "
         "uncompressed pixel data has no codestream to carry one.",
@@ -508,7 +522,6 @@ _PHOTOMETRIC_INADMISSIBLE = {
         "Declare one of the labels the syntax admits with "
         "set_attr(\"0028,0004\", ...)."),
 }
-_PHOTOMETRIC_INADMISSIBLE["YBR_RCT"] = _PHOTOMETRIC_INADMISSIBLE["YBR_ICT"]
 _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_420"] = \
     _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_422"]
 
@@ -996,7 +1009,7 @@ def _pixel_less_label_warning(ds) -> Optional[str]:
     # no pixel data is written natively even under `compression="j2k"`
     # (`_compress_j2k` has nothing to encode and leaves `file_meta`
     # alone) while `written_syntax` says JPEG 2000, and the J2K row
-    # admits `YBR_ICT`.
+    # admits `YBR_RCT`.
     #
     # A multi-valued label is only warned about here because a pixel-less
     # file re-ingests carrying both values; the pixel arms refuse it
@@ -1075,7 +1088,7 @@ def _icon_label_warning(label, at) -> Optional[str]:
         Optional[str]: The WARNING sentence, or None when the label is
         admitted or absent.
     """
-    # Not the file's row: the J2K row admits `YBR_ICT`, and a `YBR_ICT`
+    # Not the file's row: the J2K row admits `YBR_RCT`, and a `YBR_RCT`
     # icon inside a `.90` file holds no codestream for the label to be
     # true of.
     found = _label_inadmissibility(label, _ICON_WRITTEN_SYNTAX)
@@ -1085,6 +1098,41 @@ def _icon_label_warning(label, at) -> Optional[str]:
     return (f"PhotometricInterpretation {_cs_quoted(label)} on the icon at "
             f"{at} is not a label uncompressed pixel data admits: {clause} "
             f"The label was written as declared, over the samples the item "
+            f"held, and neither was changed. {_PHOTOMETRIC_ICON}")
+
+
+def _icon_label_samples_warning(label, samples, at) -> Optional[str]:
+    """The WARNING for an icon label its own sample count contradicts (#1081).
+
+    `RGB` over one sample per pixel, or `MONOCHROME2` over three: the
+    contradiction the top level corrects
+    (`pixel_geometry.resolve_photometric_interpretation`, the same
+    predicate, asked of the label alone). An icon is not corrected: by
+    the warn-and-write rule its label is written as declared, over the
+    samples it held, with this row.
+
+    Args:
+        label: The label the item holds, as written (after
+            `_full_sample_label`).
+        samples (int): The item's own SamplesPerPixel.
+        at (str): The item's path in `_item_path_words`' spelling.
+
+    Returns:
+        Optional[str]: The WARNING sentence, or None: no label at all
+        (the predicate's default for an absent label is no
+        contradiction), a label that is not one text value, or a label
+        that agrees with the sample count.
+    """
+    if not isinstance(label, str) or not label.strip():
+        return None
+    if resolve_photometric_interpretation(
+            {"0028,0004": label}, samples) is None:
+        return None
+    names = ("a one-sample image" if samples >= 3 else "a colour image")
+    return (f"PhotometricInterpretation {_cs_quoted(label)} on the icon at "
+            f"{at} names {names}, and the item declares {samples} "
+            f"{'sample' if samples == 1 else 'samples'} per pixel. The "
+            f"label was written as declared, over the samples the item "
             f"held, and neither was changed. {_PHOTOMETRIC_ICON}")
 
 
@@ -3057,9 +3105,18 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     if (_planar_configuration_to_infer(ds) is not None
             or _planar_configuration_to_override(ds) is not None):
         ds.PlanarConfiguration = 0
-    refusal = refusal_before_decode(ds)
+    # A decode that drops the excess skips the 1-bit refusal (#1094):
+    # pydicom with `allow_excess_frames=False` reads the declared frames.
+    refusal = refusal_before_decode(
+        ds, keeps_every_frame=allow_excess_frames is not False)
     if refusal is not None:
         raise RuntimeError(refusal)
+    # An Extended Offset Table with no Lengths to read it by, under a
+    # header pydicom refuses for another element (#1086): pydicom's decode
+    # would fail on the Lengths element first, in CPython's words, so its
+    # own validation is asked without the table, and its refusal naming
+    # the element is raised in its class. A no-op for every other file.
+    validate_without_the_table(ds)
     # Each keyword is forwarded only when given. On pydicom 3.0.2
     # `as_array(ds, allow_excess_frames=None)` truncates exactly as `False`
     # does, so passing a None through would silently truncate every
@@ -3175,19 +3232,24 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         arr, photometric = _decode_with_imagecodecs(ds, allow_excess_frames,
                                                     exc, beyond)
     else:
+        # The excess of a count read one per fragment (an RLE buffer,
+        # whole codestreams), dropped here because `allow_excess_frames`
+        # cannot drop it: the count it truncates against is the
+        # `number_of_frames` just overridden. Read through
+        # `declared_frame_count`, the same reading the row names, so the
+        # frames kept and the frames reported cannot drift apart. On
+        # pydicom's route only: the fallback decodes the declared frames
+        # and no more, and `arr[0]` of its one frame is its first row
+        # (#1088). Before the extension, which reads one precision per
+        # declared frame.
+        if number_of_frames is not None and allow_excess_frames is False:
+            kept = declared_frame_count(ds)
+            arr = arr[0] if kept == 1 else arr[:kept]
         # pydicom's decode only, outside the `try`: the fallback extends
         # its own (`_decode_frame`), and a refusal here is not a reason to
         # ask it.
         if wider is not None:
             arr = _extend_each_frame(arr, ds, wider)
-    # The RLE excess, dropped here because `allow_excess_frames` cannot
-    # drop it: the count it truncates against is the `number_of_frames`
-    # just overridden. Read through `declared_frame_count`, the same
-    # reading the row names, so the frames kept and the frames reported
-    # cannot drift apart.
-    if number_of_frames is not None and allow_excess_frames is False:
-        kept = declared_frame_count(ds)
-        arr = arr[0] if kept == 1 else arr[:kept]
     # Native byte order, at the one exit every door leaves by. pydicom
     # returns a big-endian source in the file's own order (`>u2`, `>i2`,
     # `>u4`) with the right *values*, and every caller that stores the
@@ -3202,10 +3264,11 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
 
 
 def _no_frame_boundary_words(ds) -> str:
-    """The refusal for encapsulated fragments with no frame boundary.
+    """The refusal for encapsulated fragments the decode could not split into the declared frames.
 
     Names the fragment count, read the way pydicom's generator reads it
-    (or says it could not be counted), and the declared NumberOfFrames.
+    (or says it could not be counted), the table pydicom read by where
+    there is one, and the declared NumberOfFrames.
 
     Args:
         ds: The pydicom `Dataset` whose Pixel Data could not be split.
@@ -3219,59 +3282,50 @@ def _no_frame_boundary_words(ds) -> str:
     # its codecs-missing message from state since #623 (not by
     # "decompress" or "missing dependencies").
     #
-    # "with no offset table" is true of a Basic Offset Table only because
-    # of a guard upstream: a file whose Basic Offset Table names a frame
-    # count is refused by `imagecodecs_handler.offset_table_frame_count`
-    # before any decode, so one that disagrees with the fragments never
-    # gets here. If that guard stops answering first, the clause becomes
-    # false.
+    # **The clause is built from what the file holds** (#1067), in the
+    # order pydicom reads by: an Extended Offset Table it walks by
+    # (`extended_offsets`), then a populated Basic Offset Table, each
+    # named with the frames it names. Such a table *runs out*, which is
+    # not a missing boundary, so "pydicom found no frame boundary" is said
+    # only where no table is walked. No door reaches a walked table here:
+    # ingest, the read door and an icon refuse on the count first
+    # (`imagecodecs_handler.offset_table_frame_count`), which since #1067
+    # counts a dropped Extended Offset Table naming more by the populated
+    # Basic Offset Table naming fewer. A direct call of the decode does.
     #
-    # **It is not true of an Extended Offset Table**: one pydicom drops
-    # (its Lengths element is another length) is counted as the same
-    # file without it unless it names more frames than declared (#621),
-    # and one naming more is decoded to the declared frames, so a
-    # dataset holding a table arrives here. The clause then says what is
-    # true: none that pydicom walks by. Before #621 a dropped table that
-    # agreed or named more got "with no offset table", over a dataset
-    # holding one.
-    #
-    # **"pydicom walks by" is said only of a table it does not walk by**
-    # (`extended_offsets(ds) is None`), never of every dataset holding
-    # the element. A table of equal Lengths naming fewer frames than
-    # declared runs out the same way, and at every door the count
-    # refuses it first; a direct call of the decode gets here, and keeps
-    # the words it had before #621 rather than a clause that is false of
-    # it.
-    #
-    # **The Basic Offset Table guard above has one hole**, measured: a
-    # dropped Extended Offset Table naming *more* frames than declared is
-    # counted from that table, so a populated Basic Offset Table naming
-    # fewer is not asked, and the file arrives here saying "with no
-    # offset table" over one pydicom walks by. Not fixed (it is the
-    # excess arm's, which #621 did not change); the clause is not
-    # lengthened for it, because the longer one would be false too.
+    # **"pydicom walks by" is said only of a table it does not walk by**:
+    # an Extended Offset Table pydicom drops (its Lengths element is
+    # another length) over an empty Basic Offset Table. Without it the
+    # clause would say "no offset table" of a dataset holding one.
     #
     # The `except` branch says nothing about the table, because it has
     # parsed nothing to say it from.
     declared = declared_frame_count(ds)
-    table = "no offset table"
     try:
         buf = BytesIO(ds.PixelData)
-        # Only over an empty Basic Offset Table: pydicom walks by a
-        # populated one, so the longer clause would be false there. That
-        # shape is reached under a dropped Extended Offset Table naming
-        # more frames than declared, and keeps the words it had.
-        if (not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable")
-                and extended_offsets(ds) is None):
-            table += " pydicom walks by"
+        basic = parse_basic_offsets(buf)
         fragments, _offsets = parse_fragments(buf)
-        held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
-                f"with {table}")
     except Exception:  # pylint: disable=broad-except
-        held = "holds fragments pydicom could not count"
-    return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
-            f"pydicom found no frame boundary in them, so the declared "
-            f"frames cannot be read")
+        return (f"Pixel Data holds fragments pydicom could not count, and "
+                f"NumberOfFrames declares {declared}: pydicom found no frame "
+                f"boundary in them, so the declared frames cannot be read")
+    held = f"holds {fragments} fragment{'' if fragments == 1 else 's'}"
+    walked = extended_offsets(ds)
+    if walked is not None:
+        named = len(walked[0]) // 8
+        table = "an Extended Offset Table"
+    elif basic:
+        named = len(basic)
+        table = "a Basic Offset Table"
+    else:
+        table = ("no offset table pydicom walks by"
+                 if ds.get("ExtendedOffsetTable") else "no offset table")
+        return (f"Pixel Data {held} with {table}, and NumberOfFrames "
+                f"declares {declared}: pydicom found no frame boundary in "
+                f"them, so the declared frames cannot be read")
+    return (f"Pixel Data {held} with {table} naming {named} "
+            f"frame{'' if named == 1 else 's'}, and NumberOfFrames declares "
+            f"{declared}: the declared frames cannot be read")
 
 
 def _t81_frames_wider(ds, ts) -> Optional[list]:
@@ -3480,13 +3534,29 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
                 f"was not asked to drop the excess") from pydicom_error
     frames = (counted[1] if counted is not None
               else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
+    # Whole codestreams under one declared frame are walked one per
+    # fragment, or the generator joins them and the first stream's
+    # decoder meets the second (#1088).
+    held = (counted[0] if counted is not None
+            and read_one_per_fragment(counted[3]) else None)
 
     try:
         # `beyond` is filled only here, on the fallback route: a pydicom
         # plugin decodes before this is asked, and that route's clamp is
         # what #671 accepted as route-dependent (#682).
-        arr = decode_declared_frames(ds, frames, beyond)
+        arr = decode_declared_frames(ds, frames, beyond, held)
     except Exception as exc:  # pylint: disable=broad-except
+        # The fallback walks the frames with pydicom's own generator, so
+        # a buffer that generator refuses fails both decodes in one
+        # sentence, which the row then said twice (#1089, the cohort's
+        # `fewer_fragments_than_frames-short`). Said once. Still chained
+        # from `exc`, which `entities._missing_decoder_words` walks.
+        if (type(exc) is type(pydicom_error)  # pylint: disable=unidiomatic-typecheck
+                and str(exc) == str(pydicom_error)):
+            kind = (ValueError if isinstance(pydicom_error, ValueError)
+                    else RuntimeError)
+            raise kind(f"{pydicom_error}; imagecodecs could not decode it "
+                       f"either, for the same reason") from exc
         raise refused(describe_exception(exc)) from exc
 
     # The handler sign-extends signed JPEG Lossless and JPEG-LS samples
@@ -4259,8 +4329,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
     Args:
         ds (pydicom.Dataset): The enclosing dataset, for its `file_meta`.
         candidates (list): `(path, tag, vr, enclosing_ds)` tuples.
-        dropped (list): Appended to with `(tag, vr)` for every candidate
-            not carried, so the parent files its `DATA_LOSS` row.
+        dropped (list): Appended to with `(tag, vr, path)` for every
+            candidate not carried, so the parent files its `DATA_LOSS` row
+            naming the item (#1082). `populate_attrs`' own entries in the
+            same list are `(tag, vr)`.
         instance (Instance): The graph this walk just built, so a carried
             icon's descriptors can be corrected on its own item.
         offset_tables (list): Appended to with `(path, tag, vr, counted,
@@ -4311,7 +4383,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
     for path, tag_str, vr, item_ds in candidates:
         item_syntax = _nested_item_syntax(transfer_syntax, item_ds, tag_str)
         if item_syntax not in _CARRIABLE_TRANSFER_SYNTAXES:
-            dropped.append((tag_str, vr))
+            dropped.append((tag_str, vr, path))
             continue
 
         try:
@@ -4351,7 +4423,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                 # The top level's RLE frame-count keyword, at this depth:
                 # without it an icon with an empty table and excess RLE
                 # fragments gets the row and then still joins its fragments.
-                if counted[3] == RLE_FRAGMENTS:
+                if read_one_per_fragment(counted[3]):
                     decode_kwargs["number_of_frames"] = counted[0]
             # The top level's HighBit header rule, at this depth.
             # After the borrow, because it reads the transfer syntax off
@@ -4379,7 +4451,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # top-level arm takes -- an icon that will not decode is not a
             # reason to refuse the file, and the instance is otherwise
             # ingested as if the icon were not carried.
-            dropped.append((tag_str, vr))
+            dropped.append((tag_str, vr, path))
             continue
         finally:
             # The borrow is for the decode only. `ds` is walked again below
@@ -5118,6 +5190,29 @@ _LINKAGE_KEY_NAMES = (
 )
 
 
+def _refuse_pixels_held_elsewhere(ds) -> None:
+    """Refuse an image whose pixels are held elsewhere (#1097).
+
+    A file with no pixel element (`entities._holds_a_pixel_element`) that
+    names a Pixel Data Provider URL at the top level or is under a JPIP
+    Referenced syntax (`entities._pixels_are_elsewhere`) holds an image
+    this library never sees. Ingested, it was exported with the URL as it
+    stood under PASS (the source UIDs a JPIP URL's query carries left
+    inside it, and no redaction zone reached the pixels it names), or,
+    under JPIP Referenced, failed every export. Owner ruling 2026-11-22,
+    Q13a.
+
+    Raises:
+        ValueError: `entities.pixels_elsewhere_words`, which never quotes
+            the URL.
+    """
+    if _holds_a_pixel_element(ds) or not _pixels_are_elsewhere(ds):
+        return
+    meta = getattr(ds, "file_meta", None) or {}
+    raise ValueError(pixels_elsewhere_words(
+        has_url=0x00287FE0 in ds, syntax=meta.get("TransferSyntaxUID")))
+
+
 def _refuse_a_multi_valued_key(ds) -> None:
     """Refuse a file one of whose linkage keys holds several values (#747).
 
@@ -5354,6 +5449,10 @@ def ingest_worker(fp: str) -> Tuple:
         # hand the parent an unhashable Patient ID or a list's text.
         _refuse_a_multi_valued_key(ds)
         _refuse_an_infinite_frame_count(ds)
+        # After the linkage-key refusals, so their rows speak first for a
+        # file both would refuse (#1097). Asked of the dataset alone, by
+        # presence: the read door's own two facts.
+        _refuse_pixels_held_elsewhere(ds)
         # After the SOP check: a generated study falls back to the SOP UID.
         meta.update(_linkage_keys(ds))
 
@@ -5480,9 +5579,18 @@ def ingest_worker(fp: str) -> Tuple:
                 # fragments again and `allow_excess_frames` truncates
                 # nothing. One counter feeds both, so the frames
                 # decoded and the frames this row names are one number.
-                if counted[3] == RLE_FRAGMENTS:
+                # Whole codestreams under one declared frame too (#1088).
+                if read_one_per_fragment(counted[3]):
                     decode_kwargs['number_of_frames'] = counted[0]
                 meta['offset_table_excess'] = counted
+            else:
+                # Bytes beyond the declared frames that are not a whole
+                # frame (#1090): the decode drops them and the export has
+                # no place for them. Only where no excess was counted, so
+                # one file never gets both rows.
+                trailing = native_trailing_words(ds)
+                if trailing is not None:
+                    meta['native_trailing'] = trailing
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds.
             high_bit_mismatch = _high_bit_mismatch(ds)
@@ -5516,7 +5624,8 @@ def ingest_worker(fp: str) -> Tuple:
                 # for `YBR_FULL_422`. AFTER the decode, unlike the
                 # PlanarConfiguration write above, which reads nothing
                 # from the array and must stay before it. Written only on
-                # difference, the same shape as `_write_str_if_changed`:
+                # difference (an exact comparison here; `_write_str_if_changed`
+                # compares by `_cs_spelling`, #1084):
                 # an RGB, monochrome or palette source has meta equal to
                 # its label and bumps no revision. Not derived from the
                 # array's shape -- a 3-sample array is equally RGB or
@@ -6451,6 +6560,21 @@ class DicomImporter:
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_SIGNAL)
 
+                    # Native bytes beyond the declared frames that are not
+                    # a frame (#1090). STANDARD, by owner ruling
+                    # (2026-11-22): the bytes are not a frame, and the
+                    # export is no less complete as an image without
+                    # them, so the row is listed and does not cost PASS.
+                    trailing = meta.get('native_trailing')
+                    if trailing:
+                        logger.warning(f"{inst.sop_instance_uid}: {trailing}")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="DATA_LOSS",
+                                entity_uid=inst.sop_instance_uid,
+                                details=trailing,
+                                loss_scope=LOSS_SCOPE_STANDARD)
+
                     # Multi-rate records are not supported, so the groups
                     # are dropped; the drop must never be silent. A record
                     # whose groups were dropped without a word is
@@ -6580,7 +6704,7 @@ class DicomImporter:
                             # bare DicomStore and no sidecar.
                             meta.setdefault(
                                 'dropped_private_binary', []).append(
-                                    (n_tag, n_vr))
+                                    (n_tag, n_vr, n_path))
                             continue
                         # The frames `_decode_nested_pixels` dropped because
                         # the item's offset table named more than it
@@ -6698,7 +6822,13 @@ class DicomImporter:
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_STANDARD)
 
-                    for tag, vr in meta.get('dropped_private_binary', ()):
+                    for entry in meta.get('dropped_private_binary', ()):
+                        # `(tag, vr)` from `populate_attrs`; `(tag, vr,
+                        # path)` for a nested pixel element
+                        # `_decode_nested_pixels` did not carry, so the row
+                        # names the item it was in (#1082).
+                        tag, vr = entry[0], entry[1]
+                        at = entry[2] if len(entry) > 2 else None
                         scope = loss_scope_for_tag(tag)
                         # Two reason clauses, because two rules drop:
                         # group 7fe0 is excluded wholesale (unrouted pixel
@@ -6720,6 +6850,18 @@ class DicomImporter:
                                       f"ingested; {reason}, and it cannot "
                                       f"be exported even with "
                                       f"remove_private_tags=False.")
+                        elif at:
+                            # An Icon Image Sequence item without its
+                            # pixels is not exported at all
+                            # (`_drop_icons_without_pixels`), so the row
+                            # says the item goes; any other item stays,
+                            # without the element.
+                            gone = ("the item is" if at[-1][0] == ICON_IMAGE_SEQUENCE
+                                    else "it is")
+                            detail = (f"Standard tag {tag} ({vr}) at "
+                                      f"{_item_path_words(at)} was not "
+                                      f"ingested; {reason}, so {gone} not "
+                                      f"in the exported file.")
                         else:
                             detail = (f"Standard tag {tag} ({vr}) was not "
                                       f"ingested; {reason}, so it is "
@@ -7627,14 +7769,13 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # about either would name a label the file does not hold.
     #
     # One relabel is still ahead of this point and cannot be pulled
-    # behind it: under JPEG 2000, `_compress_j2k` turns an `RGB` source
-    # into `YBR_RCT`, and it runs after the whole
-    # geometry write. That is harmless *because both labels are on the
-    # J2K row* -- the judgement does not change -- and it is why the
-    # readback, not this function, is the reader that sees a compressed
-    # file's final label. A future encoder relabel to something
-    # off that row would make this check answer about a label the file
-    # no longer carries.
+    # behind it: under JPEG 2000, `_compress_j2k` writes an `RGB` or
+    # `YBR_ICT` source `YBR_RCT`, and it runs after the whole geometry
+    # write. So the judgement below asks `_j2k_written_label`, the
+    # encoder's own rule, for the label the file will carry (#1080):
+    # `YBR_ICT` is off the J2K row, and judged as declared it would be
+    # warned about under a label the file does not carry. The readback
+    # remains the reader that sees a compressed file's final label.
     #
     # Two outcomes. A label the syntax does not admit is
     # **written as declared** and handed back on `warnings`: there are
@@ -7663,9 +7804,15 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     if isinstance(written, (list, tuple, MultiValue)) and len(written) > 1:
         raise _multi_valued_refusal(written)
     if warnings is not None:
-        warning = _photometric_warning(
-            _written_photometric(ds.get("PhotometricInterpretation")),
-            syntax_uid, has_pixels=True, remedy=remedy)
+        # Judged as the file will carry it: under JPEG 2000 the encoder
+        # writes every transformed source `YBR_RCT` (`_j2k_written_label`,
+        # #1080), after this runs. Under any other syntax the label is
+        # written as it stands.
+        judged = _written_photometric(ds.get("PhotometricInterpretation"))
+        if str(syntax_uid) == str(JPEG2000Lossless):
+            judged = _j2k_written_label(judged, geom.samples)
+        warning = _photometric_warning(judged, syntax_uid, has_pixels=True,
+                                       remedy=remedy)
         if warning is not None:
             warnings.append(warning)
 
@@ -8380,7 +8527,9 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
     only, by the top level's rule (`_full_sample_label`, #646). The
     Photometric Interpretation written is then judged against the
     uncompressed row
-    (`_icon_label_warning`, `_icon_label_arity_warning`): an inadmissible
+    (`_icon_label_warning`, `_icon_label_arity_warning`) and against the
+    item's own sample count (`_icon_label_samples_warning`, #1081): an inadmissible,
+    contradicted
     or multi-valued label is written as declared, with a WARNING on
     `warnings`. A removed item is not judged; it carries its own loss
     row. The icon is always written raw, whatever `ctx.compression` is.
@@ -8415,9 +8564,7 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
     # its own, and an interleaved loop would file a "gone" row while leaving
     # it in the file. Removal is then by object identity, not by recorded
     # index, because two identical icon `Dataset`s compare equal.
-    refs = getattr(inst, "_nested_pixel_refs", None)
-    if not refs:
-        return
+    refs = getattr(inst, "_nested_pixel_refs", None) or {}
 
     removals, writes = [], []
     for (path, terminal_tag), ref in refs.items():
@@ -8579,8 +8726,18 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             warnings.append(_icon_label_arity_warning(label, at))
         else:
             judged = _icon_label_warning(_written_photometric(label), at)
+            if judged is None:
+                judged = _icon_label_samples_warning(label, samples, at)
             if judged is not None:
                 warnings.append(judged)
+
+    # Every icon item left holding no Pixel Data (#1082): its pixels were
+    # not ingested, so `_merge_sequences` wrote its descriptors alone.
+    # After the writes above, and before any removal, so the paths are
+    # the file's as built; an item already decided is not reported twice.
+    _drop_icons_without_pixels(
+        ds, removals, losses,
+        decided={id(item) for _parent, _tag, item in removals})
 
     for parent, seq_tag, item in removals:
         sequence = parent[seq_tag].value
@@ -8594,6 +8751,50 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             # -- so absent is conformant and a zero-item sequence is just an
             # assertion about nothing.
             del parent[seq_tag]
+
+
+#: Icon Image Sequence, as a path step spells it.
+ICON_IMAGE_SEQUENCE = "0088,0200"
+
+
+def _drop_icons_without_pixels(ds, removals, losses, *, decided) -> None:
+    """Mark for removal every icon item holding no Pixel Data, with its row (#1082).
+
+    Walks `ds` at every depth. An Icon Image Sequence item with no
+    `(7FE0,0010)` is one whose pixels were not ingested (the decode
+    failed, or its syntax is not carried), and its descriptors without
+    pixels describe no image (PS3.3 C.7.6.1.1.6): the rule
+    `_write_back_nested_pixels` applies to every icon it cannot write.
+    Appends `(parent, seq_tag, item)` to `removals` and one STANDARD loss
+    per item. The graph is not changed.
+
+    Args:
+        ds (pydicom.Dataset): The dataset being built.
+        removals (list): Appended to, for the caller's removal by identity.
+        losses (list): Appended to with `(scope, detail)`.
+        decided (set): `id()` of items already marked for removal; neither
+            reported again nor walked into.
+    """
+    def walk(node, path):
+        for elem in list(node):
+            if elem.VR != "SQ" or elem.value is None:
+                continue
+            seq_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+            for index, item in enumerate(elem.value):
+                if id(item) in decided:
+                    continue
+                step = path + ((seq_tag, index),)
+                if seq_tag == ICON_IMAGE_SEQUENCE and "PixelData" not in item:
+                    removals.append((node, elem.tag, item))
+                    losses.append((LOSS_SCOPE_STANDARD, (
+                        f"Icon Image Sequence item at "
+                        f"{_item_path_words(step)} was not exported: it held "
+                        f"no Pixel Data, and an icon item's pixel descriptors "
+                        f"without its pixels describe no image (PS3.3 "
+                        f"C.7.6.1.1.6).")))
+                    continue
+                walk(item, step)
+    walk(ds, ())
 
 
 def _nested_loader_metadata(geometry, ref, inst) -> dict:
@@ -8968,6 +9169,17 @@ def _build_export_dataset(ctx: ExportContext, losses, corrections,
 
             # Otherwise (SR, etc.), proceed
             arr = None
+
+    # An instance with no pixels whose pixels are held elsewhere (#1097):
+    # ingest refuses such a file since 1.1, and an instance a 1.0.x ingest
+    # admitted fails here in the same sentence, never the URL, so a
+    # reopened store cannot export what ingest now refuses (owner ruling
+    # 2026-11-22, Q13b). After the read, never before: a pixel-bearing
+    # instance holding a URL keeps the URL's own handling below. In the
+    # build half, so a plugin's export fails the same way. The JPIP shape
+    # does not reach here: its read raises first, naming the syntax.
+    if arr is None and "0028,7fe0" in inst.attributes:
+        raise RuntimeError(pixels_elsewhere_words(has_url=True, syntax=None))
 
     # Resolve the geometry once, here, and use the same answer for the
     # redaction axes and the descriptors written below. It has to
@@ -9544,8 +9756,15 @@ def _serialize_dicom(built: _Built, ctx: ExportContext, losses, corrections,
     # fallback, handing the batch's `"j2k"` on would send the frame to
     # the encoder, whose guard refuses it again. A float frame and a
     # pixel-less file keep the batch value, as before.
+    declared_label = ds.get("PhotometricInterpretation")
     ds = DicomExporter._finalize_dataset(
         ds, None if j2k_fallback else ctx.compression, pixel_array=arr)
+    # The encoder wrote a `YBR_ICT` source `YBR_RCT` (#1080). INFO on
+    # `corrections`, no row: the label is the exporter's name for the
+    # codestream it wrote, as a respelling is.
+    if (declared_label == "YBR_ICT"
+            and ds.get("PhotometricInterpretation") == "YBR_RCT"):
+        corrections.append(_YBR_ICT_RELABEL_NOTE)
 
     # A limit of ours, not a defect in the data: a
     # 16-bit or signed 8-bit YBR_FULL file is conformant and is
@@ -9942,12 +10161,13 @@ _PILLOW_J2K_NOTE = (
     "only Pillow, export with use_compression=False.")
 
 #: The 3-sample labels `_compress_j2k` encodes **with** the multiple
-#: component transform. `RGB` is transformed and relabelled
-#: `YBR_RCT`; `YBR_RCT` and `YBR_ICT` are transformed and keep the label
-#: they came with, because such an instance's samples were already
-#: inverse-transformed into memory by the decode that produced them, so
-#: applying the transform on re-encode is what makes the label true of
-#: the codestream. PS3.5 8.2.4 is symmetric about this: a transformed
+#: component transform, and every one is written `YBR_RCT`
+#: (`_j2k_written_label`): `level=0` is the reversible transform, and
+#: `YBR_RCT` is its name. `RGB` and `YBR_ICT` are relabelled (`YBR_ICT`
+#: since #1080, with an INFO note); `YBR_RCT` keeps its label. Such an
+#: instance's samples were already inverse-transformed into memory by the
+#: decode that produced them, so applying the transform on re-encode is
+#: what makes the label true of the codestream. PS3.5 8.2.4 is symmetric about this: a transformed
 #: codestream must carry one of these labels, and an untransformed one
 #: must carry components matching its Photometric Interpretation. Every
 #: other label -- `YBR_FULL`, `YBR_PARTIAL_420`, `YBR_PARTIAL_422`, and
@@ -9959,6 +10179,37 @@ _PILLOW_J2K_NOTE = (
 #: `_write_pixel_geometry` runs before the encoder; neither reaches this
 #: function under its own name. A direct caller can still pass either.
 _J2K_MCT_SOURCES = frozenset({"RGB", "YBR_RCT", "YBR_ICT"})
+
+
+def _j2k_written_label(photometric, samples):
+    """The label `_compress_j2k` writes for a declared label and sample count.
+
+    `YBR_RCT` for every 3-sample label it encodes with the transform
+    (`_J2K_MCT_SOURCES`); the declared label otherwise. One function, so
+    the encoder's relabel and the build half's label judgement
+    (`_write_pixel_geometry`, which runs before the encoder) answer about
+    the same label: judged as declared, a `YBR_ICT` source would be
+    warned about under JPEG 2000 for a label the file does not carry.
+
+    Args:
+        photometric (str): The declared label, as `ds` holds it.
+        samples (int): SamplesPerPixel.
+
+    Returns:
+        str: The label the compressed file carries.
+    """
+    if samples == 3 and photometric in _J2K_MCT_SOURCES:
+        return "YBR_RCT"
+    return photometric
+
+
+#: The INFO note for a `YBR_ICT` label the encoder writes `YBR_RCT`
+#: (#1080). A note, not a row: the label is the exporter's spelling of
+#: the codestream it writes (the #646 ruling), and no sample changes.
+_YBR_ICT_RELABEL_NOTE = (
+    "PhotometricInterpretation 'YBR_ICT' was written 'YBR_RCT': the JPEG "
+    "2000 codestream this export writes carries the reversible transform, "
+    "which YBR_RCT names.")
 
 
 def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
@@ -10098,15 +10349,15 @@ def _compress_j2k(ds, pixel_array=None):
     (encoded as `uint8`); see `_J2K_ENCODABLE_FRAMES`. 32- and 64-bit
     frames are refused before any encode.
 
-    A 3-sample `RGB` source is encoded with the multiple-component
-    transform and relabelled `YBR_RCT`; a 3-sample source already
-    labelled `YBR_RCT` or `YBR_ICT` is transformed and keeps its label;
+    A 3-sample `RGB`, `YBR_ICT` or `YBR_RCT` source is encoded with the
+    multiple-component transform and written `YBR_RCT`, the reversible
+    transform's name (`_j2k_written_label`; `YBR_ICT` since #1080);
     every other source is encoded without the transform and keeps its
     label (`_J2K_MCT_SOURCES`).
 
-    Updates `file_meta.TransferSyntaxUID`, `PixelData` and, for the `RGB`
-    case alone, `PhotometricInterpretation`; mutates nothing when it
-    refuses.
+    Updates `file_meta.TransferSyntaxUID`, `PixelData` and, for an `RGB`
+    or `YBR_ICT` source, `PhotometricInterpretation`; mutates nothing
+    when it refuses.
 
     Args:
         ds (pydicom.Dataset): the dataset to compress, in place.
@@ -10249,15 +10500,17 @@ def _compress_j2k(ds, pixel_array=None):
         #    MCT decorrelates RGB, so it earns its place here (`mct=0` /
         #    `mct=1` size ratios 1.105-2.195 across five sources).
         # 2. A source **already** labelled `YBR_RCT`/`YBR_ICT` is
-        #    transformed and **keeps its label**. Such an instance can
-        #    only have come from a J2K source whose samples this library
-        #    already inverse-transformed into memory, so applying the
-        #    transform on re-encode is what makes the label true of this
-        #    codestream. Encoding it `mct=False` under the label it keeps
-        #    would declare RCT over a `COD` transform byte of 0: the same
-        #    non-conformance, mirrored. Not relabelled to `RGB`, which
-        #    would discard the source's stated colour space, and not
-        #    refused, which no ingested file would reach.
+        #    transformed and written `YBR_RCT`. Such an instance's
+        #    samples were inverse-transformed into memory by the decode
+        #    that produced them (or given the label by hand), so applying
+        #    the transform on re-encode is what makes the label true of
+        #    this codestream. Encoding it `mct=False` under the label
+        #    would declare a transform over a `COD` transform byte of 0:
+        #    the same non-conformance, mirrored. `YBR_ICT` is relabelled
+        #    (#1080): it names the irreversible transform, and `level=0`
+        #    writes the reversible one. It kept its label until then, a
+        #    false name for this codestream. Not relabelled to `RGB`,
+        #    which would discard the source's stated colour space.
         # 3. **Every other label** -- `YBR_FULL`, `YBR_PARTIAL_420`,
         #    `YBR_PARTIAL_422`, and every 1-sample label including
         #    `PALETTE COLOR` -- is encoded `mct=False` and keeps its
@@ -10331,19 +10584,18 @@ def _compress_j2k(ds, pixel_array=None):
         # `is_little_endian` are not set alongside it, because pydicom
         # derives both from the UID and removes the attributes in 4.0.
         ds.file_meta.TransferSyntaxUID = JPEG2000Lossless
-        if mct and photometric == "RGB":
+        if mct:
             # The label for the transform the codestream now carries
-            # (case 1 above). Only the `RGB` source is relabelled: a
-            # source already labelled `YBR_RCT`/`YBR_ICT` (case 2) is
-            # transformed too, and its own label is already true of the
-            # codestream -- rewriting `YBR_ICT` to `YBR_RCT` would name the
-            # wrong transform for a label this function did not choose.
-            # Written here, after every frame encoded, so a refusal leaves
-            # `ds` saying `RGB` over the pixels it still has. Re-ingesting
-            # this file relabels it `RGB` again, because `jpeg2k_decode`
-            # undoes the transform and `DECODER_RELABELS` says so -- the
-            # round trip is stable in both directions.
-            ds.PhotometricInterpretation = "YBR_RCT"
+            # (cases 1 and 2 above): `YBR_RCT`, for an `RGB`, `YBR_ICT` or
+            # `YBR_RCT` source alike. Written here, after every frame
+            # encoded, so a refusal leaves `ds` saying what it said over
+            # the pixels it still has. Re-ingesting this file relabels it
+            # `RGB` again, because `jpeg2k_decode` undoes the transform and
+            # `DECODER_RELABELS` says so -- the round trip is stable in
+            # both directions. The `YBR_ICT` note is the caller's
+            # (`_serialize_dicom`), which holds `corrections`.
+            ds.PhotometricInterpretation = _j2k_written_label(
+                photometric, samples)
 
     except _J2kFrameRefusal:
         # Re-raised unchanged, ahead of the generic handler below. Wrapped

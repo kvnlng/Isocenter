@@ -722,8 +722,9 @@ def test_ingest_says_imagecodecs_did_not_import_and_not_in_whose_words(
 
     #444 put the import failure's own words in the row. They are the
     loader's, and can hold an install path, so since the review of #1062
-    the row holds the class alone, once in the reason and once in
-    `caused by`, and never the message.
+    the row holds the class alone, and never the message. Once since
+    #1089: the reason quotes the refusal, so no `caused by` tail repeats
+    it.
 
     In-process through `ingest_worker`, the function that writes the
     row: a Session hands ingest to its own process pool, which a
@@ -741,8 +742,8 @@ def test_ingest_says_imagecodecs_did_not_import_and_not_in_whose_words(
     said = ("ImagecodecsUnavailable: imagecodecs is not available: its "
             "import raised ImportError")
     assert reason.endswith(
-        f"; imagecodecs could not decode it either: {said} (caused by "
-        f"{said})"), reason
+        f"; imagecodecs could not decode it either: {said}"), reason
+    assert reason.count(said) == 1, reason
     assert "libjpeg.so.8" not in reason and "shared object" not in reason
 
 
@@ -836,7 +837,7 @@ def test_the_lazy_load_error_carries_the_true_reason(tmp_path):
         inst.get_pixel_data()
     msg = str(exc.value)
     assert msg.startswith("Lazy load failed"), msg
-    assert msg.endswith(": Basic Offset Table names 1 frames; "
+    assert msg.endswith(": Basic Offset Table names 1 frame; "
                         "NumberOfFrames declares 2"), msg
     assert "imagecodecs" not in msg, msg
 

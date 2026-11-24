@@ -1398,7 +1398,8 @@ def test_the_gate_refuses_a_syntax_it_does_not_name(monkeypatch):
     carried, dropped = decode(
         _CARRIABLE_TRANSFER_SYNTAXES - {str(JPEGBaseline8Bit)})
     assert carried == []
-    assert dropped == [("7fe0,0010", "OB")]
+    # The item path rides with a nested drop since #1082.
+    assert dropped == [("7fe0,0010", "OB", ())]
 
 
 def test_the_carriable_transfer_syntaxes_are_the_uids_pydicom_names(tmp_path):
@@ -1989,7 +1990,7 @@ def test_an_encapsulated_icon_still_borrows_the_files_syntax():
         ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
         offset_tables=[], high_bits=[], precisions=[],
         beyond_precisions=[])
-    assert (carried, dropped) == ([], [("7fe0,0010", "OB")])
+    assert (carried, dropped) == ([], [("7fe0,0010", "OB", ())])
 
     ds.file_meta.TransferSyntaxUID = JPEGBaseline8Bit
     carried = io_handlers._decode_nested_pixels(
