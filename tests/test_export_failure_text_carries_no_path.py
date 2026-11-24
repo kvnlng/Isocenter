@@ -357,11 +357,19 @@ def test_a_source_read_failure_names_the_instance_not_the_file(
 # item (the issue's case: an icon label the file cannot encode). No
 # patient data is in a traceback; the path is.
 #
+# Since X5 (#1205, #1018) `str` under OB costs only its element, under a
+# STANDARD `DATA_LOSS` row, so it no longer reaches pydicom's writer. The
+# shape these tests use is one X5's CHANGELOG names under "Not changed" as
+# still failing the file: a list holding `None` under a text VR (here
+# `["A", None]` in Manufacturer's Model Name, LO). pydicom re-raises its
+# `AttributeError` the same way, at the top level and inside an item.
+#
 # `_export_failure_reason` is the one spelling of a worker's failure now:
 # pydicom's sentence, which names the element, up to where the traceback
 # starts.
 
 TRACEBACK_WORDS = ("Traceback", "site-packages", 'File "', ".py", "line ")
+NONE_IN_A_TEXT_LIST = ("A", None)
 
 
 def _refused_by_pydicoms_writer(ds):
@@ -376,13 +384,14 @@ def _refused_by_pydicoms_writer(ds):
     return raised.value
 
 
-def _text_under_ob(nested=False):
-    """A dataset holding `str` under OB, at the top level or in an icon."""
+def _none_in_a_text_list(nested=False):
+    """A dataset holding `["A", None]` under LO, at the top level or in an
+    icon: a value pydicom's writer refuses, and so the exporter's too."""
     from pydicom.dataset import Dataset
     from pydicom.sequence import Sequence
 
     holder = Dataset()
-    holder.add_new(0x00420011, "OB", "not bytes")
+    holder.add_new(0x00081090, "LO", list(NONE_IN_A_TEXT_LIST))
     if not nested:
         return holder
     ds = Dataset()
@@ -399,19 +408,19 @@ def _root_words(exc):
 
 def test_the_premise_pydicoms_writer_puts_a_traceback_in_the_message():
     """If pydicom stops doing this, the tests below pin nothing: say so."""
-    exc = _refused_by_pydicoms_writer(_text_under_ob())
+    exc = _refused_by_pydicoms_writer(_none_in_a_text_list())
 
-    assert type(exc) is TypeError
+    assert type(exc) is AttributeError
     assert str(exc).startswith(
-        f"With tag (0042,0011) got exception: {_root_words(exc)}\n"
+        f"With tag (0008,1090) got exception: {_root_words(exc)}\n"
         f"Traceback (most recent call last):\n"), str(exc)
     assert "site-packages" in str(exc) or "pydicom" in str(exc)
 
 
 @pytest.mark.parametrize("nested, sentence", [
-    (False, "With tag (0042,0011) got exception: "),
+    (False, "With tag (0008,1090) got exception: "),
     (True, "With tag (0088,0200) got exception: "
-           "With tag (0042,0011) got exception: ")],
+           "With tag (0008,1090) got exception: ")],
     ids=["top-level", "in-a-sequence-item"])
 def test_a_writer_refusal_is_spelled_without_its_traceback(nested, sentence):
     """The class, pydicom's sentence naming each element, and the reason.
@@ -426,11 +435,11 @@ def test_a_writer_refusal_is_spelled_without_its_traceback(nested, sentence):
     """
     from isocenter.io_handlers import _export_failure_reason
 
-    exc = _refused_by_pydicoms_writer(_text_under_ob(nested))
+    exc = _refused_by_pydicoms_writer(_none_in_a_text_list(nested))
     assert exc.__cause__ is not None
     reason = _export_failure_reason(exc)
 
-    assert reason == f"TypeError: {sentence}{_root_words(exc)}"
+    assert reason == f"AttributeError: {sentence}{_root_words(exc)}"
     for word in TRACEBACK_WORDS + ("caused by",):
         assert word not in reason, reason
 
@@ -442,15 +451,16 @@ def test_a_traceback_in_the_cause_alone_is_cut_there():
     """
     from isocenter.io_handlers import _export_failure_reason
 
-    inner = _refused_by_pydicoms_writer(_text_under_ob())
+    inner = _refused_by_pydicoms_writer(_none_in_a_text_list())
     try:
         raise RuntimeError("the file could not be written") from inner
     except RuntimeError as exc:
         reason = _export_failure_reason(exc)
 
     assert reason == (
-        "RuntimeError: the file could not be written (caused by TypeError: "
-        f"With tag (0042,0011) got exception: {_root_words(inner)})")
+        "RuntimeError: the file could not be written (caused by "
+        "AttributeError: With tag (0008,1090) got exception: "
+        f"{_root_words(inner)})")
 
 
 @pytest.mark.parametrize("exc", [
@@ -491,7 +501,7 @@ def test_the_workers_console_line_carries_no_traceback(tmp_path, capfd):
     """
     uid = "1.2.826.0.1.1053"
     inst = _ct_instance(uid)
-    inst.set_attr("0042,0011", "not bytes")
+    inst.set_attr("0008,1090", list(NONE_IN_A_TEXT_LIST))
     capfd.readouterr()
 
     outcome = _export_instance_worker(ExportContext(
@@ -501,11 +511,12 @@ def test_the_workers_console_line_carries_no_traceback(tmp_path, capfd):
         series_attributes={"0020,000e": "1.2.826.0.3.1053"}))
     err = capfd.readouterr().err
 
-    assert outcome.ok is False and type(outcome.error) is TypeError, outcome
+    assert outcome.ok is False and type(outcome.error) is AttributeError, (
+        outcome)
     lines = [line for line in err.splitlines() if "Export failed" in line]
     assert lines == [
-        f"ERROR: Export failed for instance {uid}: TypeError: With tag "
-        f"(0042,0011) got exception: {_root_words(outcome.error)}"], err
+        f"ERROR: Export failed for instance {uid}: AttributeError: With tag "
+        f"(0008,1090) got exception: {_root_words(outcome.error)}"], err
     for word in TRACEBACK_WORDS:
         assert word not in err, err
 
@@ -533,13 +544,14 @@ def _icon_session(tmp_path, edit):
     (lambda inst: inst.sequences["0088,0200"].items[0].set_attr(
         "0028,0004", "ＲＧＢ"),
      "TypeError: With tag (0088,0200) got exception: ", None),
-    (lambda inst: inst.set_attr("0042,0011", "not bytes"),
-     "TypeError: With tag (0042,0011) got exception: ", "words"),
+    (lambda inst: inst.set_attr("0008,1090", list(NONE_IN_A_TEXT_LIST)),
+     "AttributeError: With tag (0008,1090) got exception: ", "words"),
     (lambda inst: inst.sequences["0088,0200"].items[0].set_attr(
-        "0042,0011", "not bytes"),
-     "TypeError: With tag (0088,0200) got exception: "
-     "With tag (0042,0011) got exception: ", "words")],
-    ids=["icon-label-not-encodable", "text-under-ob", "text-under-ob-nested"])
+        "0008,1090", list(NONE_IN_A_TEXT_LIST)),
+     "AttributeError: With tag (0088,0200) got exception: "
+     "With tag (0008,1090) got exception: ", "words")],
+    ids=["icon-label-not-encodable", "none-in-a-text-list",
+         "none-in-a-text-list-nested"])
 def test_no_error_row_and_no_export_error_carries_a_traceback(
         tmp_path, edit, sentence, reason):
     """The row as stored, `ExportError`, its failures and the report (#1053).
@@ -567,7 +579,7 @@ def test_no_error_row_and_no_export_error_carries_a_traceback(
     opening = f"Export failed for instance {uid}: {sentence}"
     assert detail.startswith(opening), detail
     if reason is not None:
-        words = _root_words(_refused_by_pydicoms_writer(_text_under_ob()))
+        words = _root_words(_refused_by_pydicoms_writer(_none_in_a_text_list()))
         assert detail == opening + words, detail
     assert raised.value.failures == [(uid, detail)]
     message = str(raised.value).replace(str(out), "<folder>")
@@ -596,11 +608,11 @@ def test_a_bare_exception_in_the_results_is_spelled_by_the_same_helper():
     """
     from isocenter.io_handlers import DicomExporter
 
-    lost = _refused_by_pydicoms_writer(_text_under_ob())
+    lost = _refused_by_pydicoms_writer(_none_in_a_text_list())
     failures = DicomExporter._report_export_failures([lost])
 
     assert failures == [("UNKNOWN", (
-        "Export worker failed: TypeError: With tag (0042,0011) got "
+        "Export worker failed: AttributeError: With tag (0008,1090) got "
         f"exception: {_root_words(lost)}"))]
 
 
@@ -618,7 +630,7 @@ def test_write_trees_error_carries_no_traceback(tmp_path):
     from isocenter.io_handlers import DicomExporter
 
     inst = _ct_instance("1.2.826.0.1.1053.2")
-    inst.set_attr("0042,0011", "not bytes")
+    inst.set_attr("0008,1090", list(NONE_IN_A_TEXT_LIST))
     patient = Patient("PAT1", "Original Name")
     study = Study("1.2.826.0.2.1053", date(2023, 1, 1))
     study.study_time = "120000"
@@ -631,7 +643,7 @@ def test_write_trees_error_carries_no_traceback(tmp_path):
         DicomExporter.write_tree(patient, str(tmp_path / "out"),
                                  compression=None, show_progress=False)
 
-    words = _root_words(_refused_by_pydicoms_writer(_text_under_ob()))
+    words = _root_words(_refused_by_pydicoms_writer(_none_in_a_text_list()))
     assert str(raised.value) == (
-        "Export incomplete. 1 failed. First error: With tag (0042,0011) "
+        "Export incomplete. 1 failed. First error: With tag (0008,1090) "
         f"got exception: {words}")
