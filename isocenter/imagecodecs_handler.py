@@ -889,13 +889,34 @@ def _stream_start(transfer_syntax) -> Optional[Tuple[bytes, str]]:
     return None
 
 
+def _frame_count_pydicom_refuses(ds) -> bool:
+    """Does this dataset hold a NumberOfFrames pydicom's decoder refuses?
+
+    A negative or non-integer value, or `''` set in memory. Absent, 0 and
+    one holding no value in a file (None) are not refused: pydicom reads
+    each as one frame (`declared_frame_count`). Never raises.
+    """
+    if "NumberOfFrames" not in ds:
+        return False
+    value = ds.NumberOfFrames
+    if value is None:
+        return False
+    if value == "":
+        return True
+    try:
+        return int(value) < 0
+    except (TypeError, ValueError):
+        return True
+
+
 def _whole_stream_fragments(ds, declared) -> Optional[Tuple[int, WholeStreams]]:
     """Fragments that are each a whole stream, under one declared frame, or None.
 
     Asked only where no offset table names the frames and the buffer is
     not RLE. Counts only under one declared frame (NumberOfFrames 1,
     absent or 0: pydicom walks the fragments under two or more, and
-    `_walked_excess` counts that walk), for a marker-delimited syntax
+    `_walked_excess` counts that walk; never a NumberOfFrames pydicom
+    refuses, `_frame_count_pydicom_refuses`), for a marker-delimited syntax
     (`_stream_start`), when there are more fragments than declared and
     **every** fragment begins with the stream's start marker and ends
     with its end marker once trailing `0x00` padding is stripped.
@@ -921,7 +942,16 @@ def _whole_stream_fragments(ds, declared) -> Optional[Tuple[int, WholeStreams]]:
     #
     # A populated Basic Offset Table naming one frame over such fragments
     # is not asked: the table names the frames, and pydicom reads by it.
-    if declared != 1:
+    #
+    # **Never over a NumberOfFrames pydicom refuses** (review of X7,
+    # finding 1). The count is handed to the decode as `number_of_frames`,
+    # which overrides the element in pydicom's own validation, so a count
+    # here would admit a file pydicom refuses. Worse, the signed JPEG 2000
+    # refusal withholds its sentence for that refusal (#1085), so two whole
+    # signed codestreams under NumberOfFrames -1 reached Pillow and were
+    # stored shifted by 2**15. Declined, the decode raises pydicom's
+    # sentence naming the element, as it did before this count existed.
+    if declared != 1 or _frame_count_pydicom_refuses(ds):
         return None
     try:
         start = _stream_start(ds.file_meta.TransferSyntaxUID)
@@ -1117,14 +1147,7 @@ def native_trailing_words(ds) -> Optional[str]:
         return None
     if "PixelData" not in ds:
         return None
-    if "NumberOfFrames" in ds and ds.NumberOfFrames not in (None, ""):
-        try:
-            if int(ds.NumberOfFrames) < 0:
-                return None
-        except (TypeError, ValueError):
-            return None
-    elif "NumberOfFrames" in ds and ds.NumberOfFrames == "":
-        # `''` set in memory: pydicom refuses it in its own words.
+    if _frame_count_pydicom_refuses(ds):
         return None
     declared = declared_frame_count(ds)
     try:
