@@ -998,16 +998,39 @@ def test_a_plugin_write_that_never_returns_counts_for_the_disclosure(
     assert _gone(started)
 
 
-def test_a_dicom_file_written_before_its_worker_was_stopped_is_said(
-        tmp_path, monkeypatch):
-    """The built-in worker writes and renames its file, and then never
-    returns. The instance is rejected, and its `ERROR` row says a file is
-    at its planned path, which is not counted as written: never that no
-    file was written, with the file in the output folder.
+def _hang_after_writing_then(spoil):
+    """Pool initializer: the export worker writes its instance, then `spoil`
+    rewrites the file at its planned path (`"another_uid"`: the same file
+    with SOP Instance UID `9.9.673`; `"garbage"`: bytes that are not
+    DICOM), and then the worker never returns."""
+    # pylint: disable=import-outside-toplevel
+    from isocenter import io_handlers as handlers
+    real = handlers._export_instance_worker
 
-    Killing mutation: the row's text fixed as "no file was written under
-    its name" (found in the review of #673).
-    """
+    def written_spoiled_then_wedged(ctx):
+        real(ctx)
+        if spoil == "another_uid":
+            ds = pydicom.dcmread(ctx.output_path)
+            ds.SOPInstanceUID = "9.9.673"
+            ds.file_meta.MediaStorageSOPInstanceUID = "9.9.673"
+            ds.save_as(ctx.output_path, enforce_file_format=True)
+        else:
+            with open(ctx.output_path, "wb") as handle:
+                handle.write(GARBAGE)
+        while True:
+            time.sleep(3600)
+
+    handlers._export_instance_worker = written_spoiled_then_wedged
+
+
+#: What `_hang_after_writing_then("garbage")` leaves at the planned path.
+GARBAGE = b"not a DICOM file (#673)\n" * 8
+
+
+def _export_stopped_after_writing(tmp_path, monkeypatch, initializer):
+    """Export the one locked instance of `_locked_session_of_one` with every
+    worker running `initializer`, under the bound. Returns `(outcome, db,
+    out, uid)`; no worker is left."""
     monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
     monkeypatch.setenv("ISOCENTER_TASK_TIMEOUT", str(BOUND))
     started = []
@@ -1016,9 +1039,14 @@ def test_a_dicom_file_written_before_its_worker_was_stopped_is_said(
     out = tmp_path / "out"
     db = str(tmp_path / "s.db")
     with _locked_session_of_one(tmp_path) as session:
+        [uid] = [instance.sop_instance_uid
+                 for patient in session.store.patients
+                 for study in patient.studies
+                 for series in study.series
+                 for instance in series.instances]
         with monkeypatch.context() as wedging:
             wedging.setattr(parallel, "resolve_worker_initializer",
-                            lambda disable_gc=False: _hang_after_writing)
+                            lambda disable_gc=False: initializer)
             try:
                 outcome = _run_bounded(lambda: session.export(
                     str(out), use_compression=False), 180)
@@ -1029,12 +1057,120 @@ def test_a_dicom_file_written_before_its_worker_was_stopped_is_said(
                     except (OSError, ValueError):
                         pass
         assert not outcome["hung"]
-        assert isinstance(outcome.get("error"), io_handlers.ExportError), \
-            outcome
         session.store_backend.flush_audit_queue()
-    assert len(list(out.rglob("*.dcm"))) == 1
-    [error] = _rows_of(db, "ERROR")
-    assert "no file was written" not in error, error
-    assert "a file is at its planned path" in error, error
-    assert "not counted as written" in error, error
     assert _gone(started)
+    return outcome, db, out, uid
+
+
+def _rows_naming(db, uid):
+    with sqlite3.connect(db) as conn:
+        return [(action, details) for action, details in conn.execute(
+            "SELECT action_type, details FROM audit_log "
+            "WHERE entity_uid = ? AND action_type IN ('ERROR', 'WARNING') "
+            "ORDER BY id", (uid,))]
+
+
+def test_a_dicom_file_written_before_its_worker_was_stopped_counts_as_written(
+        tmp_path, monkeypatch):
+    """The built-in worker writes and renames its file, and then never
+    returns. The file at the planned path holds the instance's SOP Instance
+    UID, read back as #1020's collision arm reads a file, so the instance
+    counts as written (owner ruling 2026-11-23 on #673): `export()` returns,
+    `written == 1`, no `ERROR` row. One `WARNING` row keyed on the UID says
+    the worker was stopped after writing: what the worker found while
+    writing (its `DATA_LOSS` and `WARNING` rows) never reached the parent,
+    and the file may be one an earlier export left under the same name.
+    The recoverable-identity disclosure counts the instance.
+
+    Killing mutation: the read-back arm removed (the instance is rejected
+    with an `ERROR` row, as before the ruling); the `WARNING` dropped.
+    """
+    outcome, db, out, uid = _export_stopped_after_writing(
+        tmp_path, monkeypatch, _hang_after_writing)
+    assert "error" not in outcome, outcome
+    summary = outcome["value"]
+    assert summary.written == 1 and summary.written_uids == [uid], summary
+    assert summary.failures == [], summary
+    [path] = list(out.rglob("*.dcm"))
+    assert pydicom.dcmread(path).SOPInstanceUID == uid
+    assert _rows_of(db, "ERROR") == []
+    [(action, warning)] = _rows_naming(db, uid)
+    assert action == "WARNING", (action, warning)
+    assert "ISOCENTER_TASK_TIMEOUT" in warning and f"{BOUND} s" in warning
+    assert "counted as written" in warning and "not counted" not in warning
+    assert "did not reach" in warning, warning
+    assert "earlier export" in warning, warning
+    assert str(out) not in warning and "Subject_" not in warning, warning
+    assert len(_rows_of(db, "REVERSIBLE_EXPORT")) == 1
+
+
+def test_a_file_at_the_planned_path_holding_another_uid_is_not_counted(
+        tmp_path, monkeypatch):
+    """The worker writes its file, the file is then rewritten to hold
+    another SOP Instance UID (the shape of a name the volume folds onto
+    another instance's file, #1020), and the worker never returns. The
+    instance is rejected: `ExportError`, one `ERROR` row saying the file at
+    its planned path holds another SOP Instance UID and is not counted.
+    The row quotes no UID read from the file, and the file is left as it
+    is: no file is ever deleted.
+
+    Killing mutation: any file at the planned path counted as written
+    (the UID not compared).
+    """
+    outcome, db, out, uid = _export_stopped_after_writing(
+        tmp_path, monkeypatch,
+        functools.partial(_hang_after_writing_then, "another_uid"))
+    assert isinstance(outcome.get("error"), io_handlers.ExportError), outcome
+    [path] = list(out.rglob("*.dcm"))
+    assert pydicom.dcmread(path).SOPInstanceUID == "9.9.673"
+    [(action, error)] = _rows_naming(db, uid)
+    assert action == "ERROR", (action, error)
+    assert "ISOCENTER_TASK_TIMEOUT" in error, error
+    assert "holds another SOP Instance UID" in error, error
+    assert "not counted as written" in error, error
+    assert "9.9.673" not in error and "Subject_" not in error, error
+
+
+def test_a_file_at_the_planned_path_that_cannot_be_read_is_not_counted(
+        tmp_path, monkeypatch):
+    """The worker writes its file, the file is then overwritten with bytes
+    that are not DICOM, and the worker never returns. The instance is
+    rejected with one `ERROR` row saying the file's SOP Instance UID could
+    not be read back, so it is not counted; the file keeps its bytes.
+
+    Killing mutation: an unreadable file counted as written (None read as
+    a match); the two sentences swapped.
+    """
+    outcome, db, out, uid = _export_stopped_after_writing(
+        tmp_path, monkeypatch,
+        functools.partial(_hang_after_writing_then, "garbage"))
+    assert isinstance(outcome.get("error"), io_handlers.ExportError), outcome
+    [path] = list(out.rglob("*.dcm"))
+    assert path.read_bytes() == GARBAGE
+    [(action, error)] = _rows_naming(db, uid)
+    assert action == "ERROR", (action, error)
+    assert "could not be read back" in error, error
+    assert "not counted as written" in error, error
+    assert "holds another" not in error, error
+
+
+def test_the_stopped_export_reads_the_file_through_the_collision_seam(
+        tmp_path, monkeypatch):
+    """The read-back is `session._sop_instance_uid_in`, the one reader
+    #1020's collision arm uses and its tests replace: no second reader.
+    Replaced to answer None, a file the worker wrote whole is rejected as
+    unreadable.
+
+    Killing mutation: the timeout arm given a reader of its own.
+    """
+    # pylint: disable=import-outside-toplevel
+    from isocenter import session as session_module
+    monkeypatch.setattr(session_module, "_sop_instance_uid_in",
+                        lambda path: None)
+    outcome, db, out, uid = _export_stopped_after_writing(
+        tmp_path, monkeypatch, _hang_after_writing)
+    assert isinstance(outcome.get("error"), io_handlers.ExportError), outcome
+    [path] = list(out.rglob("*.dcm"))
+    assert pydicom.dcmread(path).SOPInstanceUID == uid
+    [(action, error)] = _rows_naming(db, uid)
+    assert action == "ERROR" and "could not be read back" in error, error
