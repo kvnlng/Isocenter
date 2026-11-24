@@ -35,14 +35,16 @@ import numpy as np
 import pydicom
 import pytest
 from pydicom.encaps import encapsulate, generate_fragments, parse_basic_offsets
+from pydicom.dataset import Dataset
 from pydicom.pixels.decoders.base import DecodeRunner
+from pydicom.sequence import Sequence
 
 from isocenter import imagecodecs_handler
 from isocenter.imagecodecs_handler import (HEADER_REFUSED, HEADER_UNASKED,
                                            _header_verdict,
                                            signed_codestream_refusal)
 from isocenter.io_handlers import _decode_pixels, ingest_worker
-from support.decode_doors import through_the_fallback
+from support.decode_doors import dataset, through_the_fallback, write
 from test_j2k_signedness_against_pixel_representation import (SIGNED_16,
                                                               _dataset,
                                                               _ingest,
@@ -194,7 +196,7 @@ def _two_whole_signed_codestreams(number_of_frames):
     return ds
 
 
-NUMBER_OF_FRAMES = "(0028,0008) 'Number of Frames' value of '-1' is invalid"
+NUMBER_OF_FRAMES = "A (0028,0008) 'Number of Frames' value of '-1' is invalid"
 
 
 @pytest.mark.parametrize("number_of_frames", [None, 1, 0, -1],
@@ -223,3 +225,37 @@ def test_two_whole_signed_codestreams_are_never_stored(tmp_path,
         "signed samples stored shifted by 2**15")
     assert summary.ingested == 0
 
+
+
+@pytest.mark.parametrize("number_of_frames", [1, -1])
+def test_an_icon_of_two_whole_signed_codestreams_is_never_stored(
+        tmp_path, number_of_frames):
+    """The icon door counts by the same function, so it is pinned too.
+
+    Red if an icon's two whole signed codestreams under NumberOfFrames
+    -1 are counted: its `number_of_frames` then overrides the element and
+    the icon's samples were carried shifted by 2**15.
+    """
+    signed = _two_whole_signed_codestreams(number_of_frames)
+    icon = Dataset()
+    for keyword in ("Rows", "Columns", "SamplesPerPixel",
+                    "PhotometricInterpretation", "BitsAllocated",
+                    "BitsStored", "HighBit", "PixelRepresentation",
+                    "NumberOfFrames", "PixelData"):
+        setattr(icon, keyword, signed[keyword].value)
+    ds = dataset("1.2.840.10008.1.2.1", rows=2, cols=2, bits_allocated=8,
+                 native=bytes(4))
+    ds.IconImageSequence = Sequence([icon])
+    # An icon is read by the file's own syntax: the top level is written
+    # under J2K too, with a valid unsigned codestream of its own.
+    ds.file_meta.TransferSyntaxUID = signed.file_meta.TransferSyntaxUID
+    ds.PixelData = _dataset(np.zeros((2, 2), np.uint16), 0).PixelData
+    ds["PixelData"].is_undefined_length = True
+    ds.IconImageSequence[0]["PixelData"].is_undefined_length = True
+    path = write(tmp_path, ds)
+
+    result = ingest_worker(path)
+
+    assert result[-1] is None, result[-1]
+    assert result[0]["nested_pixels"] == []
+    assert result[0]["nested_offset_table"] == []
