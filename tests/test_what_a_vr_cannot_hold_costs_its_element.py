@@ -566,6 +566,26 @@ def test_under_at_a_tag_is_written_as_before(make, written):
     assert losses == [] and notes == []
 
 
+@pytest.mark.parametrize("make, written", [
+    # `(0000,0018)\(0001,0000)`, as `[0x0018, 0x10000]` always was.
+    pytest.param(lambda: (0x0018, 0x10000),
+                 b"\x00\x00\x18\x00\x01\x00\x00\x00", id="half-past-16-bits"),
+    # `(0018,1063)\(0000,1064)`: the full tag, then a group-0000 tag.
+    pytest.param(lambda: (BaseTag(0x00181063), 0x1064),
+                 _ONE + b"\x00\x00\x64\x10", id="full-tag-and-a-half"),
+])
+def test_under_at_a_pair_that_is_not_one_tag_is_the_tags_its_list_is(
+        make, written):
+    """Owner ruling of 2026-11-23 on #1026, consistent with Q4: a 2-tuple
+    under a standard AT whose halves are not both 0..0xFFFF is written as
+    the list it equals, two tags, with no row. At 3e4ee91a pydicom read
+    each pair as one tag, refused it (`OverflowError`), and the element
+    was dropped under a STANDARD row."""
+    raw, losses, notes = _merged({AT_TAG: make()})
+    assert raw(AT_TAG) == ("AT", written)
+    assert losses == [] and notes == []
+
+
 # -- T9: no cell fails the file -----------------------------------------------
 
 def _every_cell():
