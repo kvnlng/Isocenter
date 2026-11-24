@@ -156,8 +156,14 @@ def test_a_blocked_codec_module_gets_advice_naming_it(tmp_path, name, module):
 def test_no_path_reaches_the_advice(tmp_path):
     """The hook's `ImportError` names an install path; nothing quotes it.
 
-    Red if `from None` is dropped: the loader's message would ride the
-    chain into `describe_exception`'s tail.
+    This pins the outcome only. No mutant of the fallback's `raise` is
+    known to turn it red. Measured on f609df9a (3.12.14): with `from None`
+    dropped, this whole file stays green, because
+    `logger.describe_exception` reads `__cause__` only and never the
+    implicit `__context__` that `from None` hides. With the refusal raised
+    `from` the `DelayedImportError`, the read-door and ingest tests above
+    and below go red on `caused by` and `DelayedImportError`, and this one
+    stays green, because imagecodecs' own message does not quote the path.
     """
     got = _child(tmp_path, "_ljpeg", READ_DOOR,
                  get_testdata_file("JPEG-LL.dcm"))
