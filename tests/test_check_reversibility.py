@@ -38,14 +38,21 @@ from isocenter.session import DicomSession
 #: *before* `save_as` is reached, so nothing is created on disk.
 DROPPED_TAG = "0028,0030"
 
-#: Overlay Rows, VR `US`. A string here encodes fine into the object
-#: graph and raises inside `save_as`, at group `6000` -- which is past
-#: (0400,0500), so the token is already serialized when the write gives
-#: up. Before #199 that left a readable partial carrying the encrypted
-#: originals under the real name (#198); the worker now writes to a
-#: temp name and renames only on success, so this arm must deliver
-#: nothing at all.
-LATE_FAILURE_TAG = "6000,0010"
+#: Overlay Label, VR `LO`, holding `["A", None]`. That value encodes
+#: fine into the object graph and raises inside `save_as`, at group
+#: `6000` -- which is past (0400,0500), so the token is already
+#: serialized when the write gives up. Before #199 that left a readable
+#: partial carrying the encrypted originals under the real name (#198);
+#: the worker now writes to a temp name and renames only on success, so
+#: this arm must deliver nothing at all.
+#:
+#: This arm used a `str` under Overlay Rows (`6000,0010`, US) until X5
+#: (#1205, #1018): since then that value costs only its element, under a
+#: STANDARD `DATA_LOSS` row, and the file is written. A list holding
+#: `None` under a text VR is a shape X5's CHANGELOG names under "Not
+#: changed" as still failing the file (#1207). The group stays `6000`.
+LATE_FAILURE_TAG = "6000,1500"
+LATE_FAILURE_VALUE = ("A", None)
 
 
 def _session_with_locked_identity(tmp_path, lock=True, instances=1,
@@ -75,7 +82,7 @@ def _session_with_locked_identity(tmp_path, lock=True, instances=1,
                 continue
             inst.set_attr(tag, val)
         if n in truncate_instances:
-            inst.set_attr(LATE_FAILURE_TAG, "not-a-number")
+            inst.set_attr(LATE_FAILURE_TAG, list(LATE_FAILURE_VALUE))
         inst.set_pixel_data(np.zeros((10, 10), dtype=np.uint16))
         se.instances.append(inst)
 
@@ -378,7 +385,7 @@ def test_a_failed_write_costs_exactly_one_existence_check(
     The exact count on a named path is what a wrong path filter cannot
     fake: its clean twin above could read zero through a filter that
     matches nothing, but this arm must find precisely one call and
-    name the failed instance's planned path. The `(6000,0010)`
+    name the failed instance's planned path. The `(6000,1500)`
     late-failure arm delivers no file post-#199, so the union's
     filesystem half has exactly one question to ask.
     Kills: dropping `task.instance.sop_instance_uid not in delivered and`

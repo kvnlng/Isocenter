@@ -2013,9 +2013,15 @@ def _run_bounded(call, seconds):
     worker.join(seconds)
     outcome["hung"] = worker.is_alive()
     if outcome["hung"]:
-        for child in multiprocessing.active_children():
-            child.kill()
-        worker.join(60)
+        # Killed again until the call returns: a call that retries on a
+        # fresh worker (#654's rounds, #673) spawns a new child after each
+        # kill, and one round of kills left that call, and the test's own
+        # teardown behind it, waiting for good.
+        deadline = time.monotonic() + 60
+        while worker.is_alive() and time.monotonic() < deadline:
+            for child in multiprocessing.active_children():
+                child.kill()
+            worker.join(0.5)
     return outcome
 
 

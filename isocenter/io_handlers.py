@@ -146,7 +146,9 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   refusal_before_decode,
                                   validate_without_the_table)
 from .parallel import (run_parallel, _resolve_strategy,
-                       new_spawn_process_pool)
+                       new_spawn_process_pool, resolve_task_timeout,
+                       stop_process_pool, _RanPastTheBound,
+                       _TaskDidNotFinish)
 from .validation import IODValidator
 from .sidecar import SidecarManager
 from .waveform import filter_dangling_annotation_refs
@@ -4535,6 +4537,28 @@ _NO_INGEST_WORKER_STARTS = (
     "killed as it starts")
 
 
+#: The reason a file is failed with when a pool was stopped once already
+#: while this call waited on it past the time bound, and then a fresh
+#: one-worker pool, which had run a trivial task and nothing else, did not
+#: return it within the bound as the first file it was given (#673; owner
+#: rulings Q7, Q8). Takes
+#: `bound`. A constant because tests match its prefix and the CHANGELOG
+#: quotes it.
+_RAN_PAST_THE_BOUND = (
+    "An ingest worker process was stopped while this file was not returned "
+    "within the {bound:g} s bound (ISOCENTER_TASK_TIMEOUT), and a fresh "
+    "worker process given this file alone, as its first file, did not "
+    "return it within the bound either and was stopped")
+
+#: The least time the trivial task ahead of a one-at-a-time round gets,
+#: whatever the bound (#673). It runs on a worker that has only just been
+#: spawned, and a spawn that imports numpy and pydicom has been measured
+#: at seconds under load: starting a process is not reading a file, and a
+#: short bound must not make every file left "not read". No variable;
+#: tests patch it.
+_CANARY_FLOOR_S = 60
+
+
 def _failed_result(fp, reason):
     """`ingest_worker`'s tuple for a failed file, built in the parent.
 
@@ -4622,6 +4646,21 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     retry_strategy = dataclasses.replace(
         strategy, show_progress=False, threads_request_overridden_by=None,
         chunksize=1)
+    # One bound for every round of this call, so each round and the row it
+    # writes name the same one (#673). Round 0, on the shared pool, is timed
+    # by how long this call waits on one file (`parallel._HeadWatch`), which
+    # accuses no file: a stop there writes no row and sends the files not
+    # yet returned to the one-at-a-time rounds below, where one worker
+    # reads one file and the same watch is exact (owner ruling Q9). A file
+    # is rejected only at its second stop, and only when that stop is in a
+    # one-at-a-time round with the file first (owner ruling Q8).
+    bound = resolve_task_timeout()
+    # Every file a stop was made on: the file the call was waiting on when
+    # a watch fired. Never inferred from the round alone -- a
+    # one-at-a-time round entered on a death, not on a stop, holds a file
+    # no stop has been made on yet, and its first stop is its first.
+    stopped_once = set()
+    canary_bound = None if bound is None else max(bound, _CANARY_FLOOR_S)
     pending = list(files)
     first = True
     alone = 0          # > 0: read this many of `pending` one at a time
@@ -4631,6 +4670,11 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
         failure = None
         cannot_start = None
         delivered = 0
+        # Whether the round ended with nothing in flight. Any other way out
+        # (Ctrl-C, a reader that stops, a trivial task that never returned)
+        # leaves a worker that may never return, and `shutdown(wait=True)`
+        # would wait on it for good (#673).
+        settled = False
         try:
             if first:
                 round_executor, batch = executor, pending
@@ -4659,10 +4703,17 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                     # a builtin: it pickles by reference and touches no
                     # file.
                     try:
-                        pool.submit(os.getpid).result()
+                        pool.submit(os.getpid).result(timeout=canary_bound)
                         canary_deaths = 0
                     except BrokenProcessPool as exc:
                         cannot_start = exc
+                    except concurrent.futures.TimeoutError:
+                        # A worker that cannot run `os.getpid` in that time
+                        # is stuck starting, not reading: counted as one
+                        # that cannot start. The `finally` ends it.
+                        cannot_start = TimeoutError(
+                            f"a trivial task did not return within "
+                            f"{canary_bound:g} s")
             if cannot_start is None:
                 # `yield_exceptions=True` changes nothing for a file that
                 # raises -- `ingest_worker` catches its own exceptions --
@@ -4673,15 +4724,35 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                                            return_generator=True,
                                            ordered=True,
                                            yield_exceptions=True,
-                                           strategy=round_strategy):
+                                           strategy=round_strategy,
+                                           task_timeout=bound):
+                    if isinstance(result, _TaskDidNotFinish):
+                        # Only the slot pool makes this: a direct
+                        # `import_files(executor=None)` under
+                        # `ISOCENTER_MAX_TASKS_PER_CHILD`. That pool has
+                        # already run the file once more, alone, as the
+                        # first task of a fresh worker, and stopped it a
+                        # second time (Q8): the file's rejection, in its
+                        # place. Read as the pool's own failure, it raised
+                        # out of the import and lost every file.
+                        delivered += 1
+                        yield _failed_result(
+                            result.item,
+                            _RAN_PAST_THE_BOUND.format(bound=bound))
+                        continue
                     if isinstance(result, Exception):
                         failure = result
                         break
                     delivered += 1
                     yield result
+                settled = True
         finally:
             if pool is not None:
-                pool.shutdown(wait=True, cancel_futures=True)
+                if settled:
+                    # Every worker answered or ended: nothing to wait on.
+                    pool.shutdown(wait=True, cancel_futures=True)
+                else:
+                    stop_process_pool(pool)
         if cannot_start is not None and not canary_deaths:
             # Once is not "no worker can start": a worker killed as it
             # started for a reason of the moment would otherwise cost every
@@ -4707,6 +4778,12 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 and on_executor_broken is not None):
             on_executor_broken(executor)
         first = False
+        stopped_before = False
+        if isinstance(failure, _RanPastTheBound) and delivered < len(batch):
+            # Ordered, so the result waited on is `batch[delivered]`.
+            held = batch[delivered]
+            stopped_before = held in stopped_once
+            stopped_once.add(held)
         if failure is None:
             pending = pending[len(batch):]
             alone = 0
@@ -4730,6 +4807,28 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 "%d file(s) one at a time; reading on from the file it held, "
                 "first on another fresh worker.",
                 describe_exception(failure), delivered)
+            continue
+        if alone and isinstance(failure, _RanPastTheBound) \
+                and not stopped_before:
+            # One worker, behind the canary, and this file first, so the
+            # stop is this file's own; but its first (owner ruling Q8). A
+            # one-at-a-time round entered on a death reaches here. Read it
+            # again, first, on another fresh worker, with no row.
+            logger.warning(
+                "An ingest worker process given one file alone was stopped "
+                "past the %g s bound (ISOCENTER_TASK_TIMEOUT); reading that "
+                "file once more, first, on another fresh worker before it is "
+                "reported (#673).", bound)
+            continue
+        if alone and isinstance(failure, _RanPastTheBound):
+            # One worker, behind the canary, and this file first: the file
+            # it was stopped on is the file not returned in time, a second
+            # time (#673). Its own row; never `_WORKER_ENDED_READING`, which
+            # says the worker ended on its own.
+            yield _failed_result(batch[0],
+                                 _RAN_PAST_THE_BOUND.format(bound=bound))
+            pending = pending[1:]
+            alone = 0
             continue
         if alone:
             # One worker, and it had run the canary and nothing else: the
@@ -13496,6 +13595,106 @@ def _numeric_arm(vr, value):
     raise ValueError(f"the value fits no numeric arm of {vr}")
 
 
+def _outcome_of_a_task_not_finished(stopped,
+                                    read_back_uid=None) -> "ExportOutcome":
+    """The `ExportOutcome` for an instance whose export did not finish
+    within the time bound twice (#673; owner ruling Q7).
+
+    Failed, except where a file is at the planned path and `read_back_uid`
+    reads the instance's own SOP Instance UID from it (owner ruling
+    2026-11-23): the worker renames its file into place before it returns,
+    so a worker stopped after the rename leaves the whole file. That
+    instance counts as written, with one warning: what the stopped worker
+    found while writing never reached the parent. A plugin's instance is
+    never read back: there is no planned path to read.
+
+    Args:
+        stopped (_TaskDidNotFinish): The pool's report; its `item` is the
+            `ExportContext`.
+        read_back_uid (Optional[Callable[[str], Optional[str]]]): The
+            reader of a file's `(0008,0018)`, None when it cannot be read.
+            `session.export()` passes `session._sop_instance_uid_in`, the
+            reader #1020's collision arm uses. None: no file is read
+            back, and a file at the planned path is not counted.
+
+    Returns:
+        ExportOutcome: Either `ok=True` with the planned path and one
+        warning, or `ok=False` with an `error` naming the bound and no
+        path; its UID and plan position either way, and `handed` True for
+        a plugin's instance.
+    """
+    ctx = stopped.item
+    writer = getattr(ctx, "writer", None)
+    refused = getattr(ctx, "refusal", None) is not None
+    # A plugin's instance counts as handed (owner ruling Q-A on #783): the
+    # worker was stopped, so whether `write()` was reached, and what it
+    # kept of the dataset, cannot be read here. A `write()` that keeps the
+    # token and then never returns (a stuck upload) holds it all the same,
+    # and the recoverable-identity disclosure must count it. This also
+    # counts an instance stopped before `write()` was reached: a disclosure
+    # too many, never one too few. An instance refused before `write()`
+    # raises at once and never reaches the bound.
+    handed = writer is not None and not refused
+    output_path = getattr(ctx, "output_path", None)
+    uid = getattr(getattr(ctx, "instance", None), "sop_instance_uid", None)
+    position = getattr(ctx, "position", None)
+    stopped_text = (f"its export did not finish within the {stopped.bound:g} "
+                    f"s bound (ISOCENTER_TASK_TIMEOUT) twice, the second "
+                    f"time alone on a fresh worker process, and each worker "
+                    f"it ran on was stopped")
+    if writer is not None:
+        what = ("the exporter was handed its dataset, and what it wrote or "
+                "kept of it is not known")
+    elif output_path and os.path.exists(output_path):
+        # A worker stopped after its rename leaves its file (review of
+        # #673). The file is read back as `_report_export_collisions` reads
+        # one (#1020), by the same reader, and decides (owner ruling
+        # 2026-11-23). It is never deleted, whatever it holds.
+        held = None if read_back_uid is None else read_back_uid(output_path)
+        if read_back_uid is not None and isinstance(uid, str) and uid \
+                and held == uid:
+            # Counted, and still a `WARNING` row, for two facts read from
+            # this module: the worker gathers its `DATA_LOSS` and
+            # `WARNING` findings before the rename and returns them only
+            # after it, so a stopped worker's findings about this file are
+            # lost, and a file without its loss rows must not grade PASS;
+            # and files are named by UID while an export into a folder an
+            # earlier export used is allowed, so the file read back may be
+            # that export's, written under another policy. No path: it is
+            # `Subject_<Patient ID>/...`.
+            return ExportOutcome(
+                ok=True, output_path=output_path, sop_instance_uid=uid,
+                warnings=[
+                    f"I{stopped_text[1:]}. A file at its "
+                    f"planned path holds its SOP Instance UID (0008,0018), "
+                    f"so it is counted as written. What the stopped worker "
+                    f"found while writing it (elements it dropped, claims "
+                    f"of the source it could not honour) did not reach "
+                    f"this process, and the file may be one an earlier "
+                    f"export left under the same name."],
+                position=position, handed=handed)
+        if read_back_uid is None:
+            what = ("a file is at its planned path, which a stopped worker "
+                    "may have written; it is not counted as written")
+        elif held is None:
+            what = ("a file is at its planned path, and its SOP Instance "
+                    "UID (0008,0018) could not be read back from it, so it "
+                    "is not counted as written")
+        else:
+            # The UID read is not quoted: it is whatever the file holds.
+            what = ("a file is at its planned path, and it holds another "
+                    "SOP Instance UID (0008,0018), so it is not counted as "
+                    "written")
+    else:
+        what = "no file is at its planned path"
+    # Text, not the exception: `_report_export_failures` keeps a string as
+    # given, and the class name would add nothing a reader needs. It names
+    # no path (the output path is `Subject_<Patient ID>/...`).
+    return ExportOutcome(
+        ok=False, output_path=output_path, sop_instance_uid=uid,
+        error=f"{stopped_text}; {what}", position=position, handed=handed)
+
+
 def _in_plan_order(results) -> list:
     """`results` sorted by plan position, stably (#999).
 
@@ -13999,7 +14198,8 @@ class DicomExporter:
             executor=None,
             maxtasksperchild: int = None,
             disable_gc: bool = False,
-            store_backend=None):
+            store_backend=None,
+            read_back_uid=None):
         """
         Exports a flat list of ExportContexts using parallel workers.
 
@@ -14014,6 +14214,11 @@ class DicomExporter:
                 `DATA_LOSS` audit entry for each element the workers could
                 not write. Without it the losses are still logged, but
                 only logged.
+            read_back_uid (Callable[[str], Optional[str]], optional): The
+                reader of a file's SOP Instance UID, for an instance whose
+                worker was stopped at the time bound with a file at its
+                planned path (#673): a file holding the instance's UID
+                counts as written. None: such a file is not counted.
 
         Returns:
             ExportSummary: what reached disk and what did not. An
@@ -14041,7 +14246,18 @@ class DicomExporter:
             # Same reason as `write_tree`: `_report_export_failures`'
             # Exception arm is unreachable without it, and a lost worker
             # would take the whole batch's accounting with it.
-            yield_exceptions=True)
+            yield_exceptions=True,
+            # Read here, once per export (#673). It reaches the recycling
+            # pool `session.export()` always asks for; `write_tree()`'s
+            # pool takes none (it is threads on a free-threaded build).
+            task_timeout=resolve_task_timeout())
+        # An instance not written in time, twice, comes back from the pool
+        # as `_TaskDidNotFinish` holding its context: an outcome naming it,
+        # in its place in the plan, so its row is keyed on its UID and not
+        # UNKNOWN.
+        results = (_outcome_of_a_task_not_finished(r, read_back_uid)
+                   if isinstance(r, _TaskDidNotFinish) else r
+                   for r in results)
 
         # Two passes -- see the note in `write_tree`.
         #

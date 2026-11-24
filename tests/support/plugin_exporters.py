@@ -10,6 +10,7 @@ because the test reads it from another process.
 """
 import json
 import os
+import time
 
 from pydicom.multival import MultiValue
 
@@ -192,6 +193,22 @@ class WriteThenRaise(exporters.Exporter):
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(json.dumps({"has_token": 0x04000500 in dataset}))
         raise RuntimeError("late failure")
+
+
+class WriteThenHang(exporters.Exporter):
+    """Writes what it was handed, then never returns: a stuck upload
+    (#673). The time bound stops its worker; it kept the token all the
+    same."""
+
+    def write(self, dataset, item, folder, **options):
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "kept.jsonl")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"uid": item.sop_instance_uid,
+                                     "has_token": 0x04000500 in dataset})
+                         + "\n")
+        while True:
+            time.sleep(3600)
 
 
 class OptionNamedDataset(exporters.Exporter):

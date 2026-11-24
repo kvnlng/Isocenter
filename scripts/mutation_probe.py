@@ -148,7 +148,7 @@ TARGETS = {
     # the mutation those files exist to kill -- an attribution computed
     # after the `force_threads` short-circuit. Extras cost the guard
     # nothing.
-    "isocenter/parallel.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+    "isocenter/parallel.py": (["tests/test_a_task_that_never_finishes_is_stopped.py", "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                "tests/test_the_recycling_pool_is_a_slot_pool.py",
                                "tests/test_an_export_survives_a_worker_that_cannot_leave.py",
                                "tests/test_an_export_whose_worker_is_killed_returns.py",
@@ -183,7 +183,7 @@ TARGETS = {
     # 5 sites, exhaustive: all 5 killed. Thirteen files; 20.3s/pass at seven.
     "isocenter/exporters/__init__.py": (["tests/test_an_icon_without_pixels_is_not_exported.py",  # #1082: a plugin export gets the row
                                          "tests/test_an_icon_label_is_judged_against_its_samples.py",  # #1081: a plugin export gets the icon label row
-                                         "tests/test_what_a_vr_cannot_hold_costs_its_element.py", "tests/test_a_plugin_writes_what_the_dicom_export_would_write.py", "tests/test_the_built_in_formats_share_the_session_gates.py", "tests/test_a_plugin_is_told_apart_by_its_class.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
+                                         "tests/test_what_a_vr_cannot_hold_costs_its_element.py", "tests/test_a_plugin_writes_what_the_dicom_export_would_write.py", "tests/test_a_task_that_never_finishes_is_stopped.py", "tests/test_the_built_in_formats_share_the_session_gates.py", "tests/test_a_plugin_is_told_apart_by_its_class.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
                                          "tests/test_murmur_annotations.py",
                                          "tests/test_study_date_roundtrip.py", "tests/test_tutorials_run.py",
                                          "tests/test_two_signals_of_one_record_do_not_share_a_lead_name.py",
@@ -468,7 +468,8 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_whole_codestreams_under_one_frame_keep_frame_0.py",  # #1088
+    "isocenter/io_handlers.py": (["tests/test_a_task_that_never_finishes_is_stopped.py",
+                                  "tests/test_whole_codestreams_under_one_frame_keep_frame_0.py",  # #1088
                                   "tests/test_bytes_beyond_the_frames_that_are_no_frame_are_said.py",  # #1090
                                   "tests/test_a_reversibly_transformed_codestream_is_labelled_ycbcr_rct.py",  # #1080
                                   "tests/test_an_icon_without_pixels_is_not_exported.py",  # #1082
@@ -796,7 +797,8 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_reversibly_transformed_codestream_is_labelled_ycbcr_rct.py",  # #1080
+    "isocenter/session.py": (["tests/test_a_task_that_never_finishes_is_stopped.py",
+                              "tests/test_a_reversibly_transformed_codestream_is_labelled_ycbcr_rct.py",  # #1080
                               "tests/test_an_icon_without_pixels_is_not_exported.py",  # #1082
                               "tests/test_pixels_held_elsewhere_are_refused_at_ingest.py",  # #1097
                               "tests/test_an_icon_label_is_judged_against_its_samples.py",  # #1081
