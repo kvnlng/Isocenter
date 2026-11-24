@@ -119,7 +119,10 @@ not depend on the format, as it does for `dicom`:
   instance fails, with an `ERROR` row, before `write()` sees it;
 - one `ERROR` row for each instance whose `write()` raised, one
   `DATA_LOSS` row for each element the dataset could not carry, and the
-  collision report;
+  collision report. The dataset does not hold an element whose value
+  its VR cannot hold, such as `7` under OB: that element has its row
+  ([What Isocenter writes](../export-output.md)), and `write()` never
+  sees it;
 - the recoverable-identity disclosure, the delivery counters, one
   `EXPORT` row and `ExportError` last, when no instance was written and
   at least one failed.

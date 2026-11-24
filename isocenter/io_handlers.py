@@ -105,7 +105,9 @@ from pydicom.values import convert_numbers
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
-                       iter_item_tree, PhiStatus, _python_value)
+                       iter_item_tree, PhiStatus, _python_value,
+                       _one_tag_of)
+from . import entities
 from .uids import generated_uid
 from .reversibility import ReversibilityService
 from .logger import (describe_exception, describe_exception_without_paths,
@@ -1500,6 +1502,17 @@ def _value_fits_vr(value, vr: str) -> bool:
         # exists to refuse.
         if vr in _VM_ONE_TEXT_VRS:
             return False
+        if vr == 'PN' and any(isinstance(a, str) and '\\' in a
+                              for a in value):
+            # #1014. A member holding a backslash is several Person
+            # Names, so the list would be written as more names than it
+            # holds, with no row. #951's split below is for a bare `str`
+            # only, which is how `_pn_text` holds a source's several
+            # names; a list member never is. Every other text VR already
+            # refuses a backslash in a member through the `str` arm.
+            # Declined here, the list takes the fallback, which refuses
+            # the backslash too: one PRIVATE row, as under a recorded LO.
+            return False
         return bool(value) and all(_value_fits_vr(a, vr) for a in value)
 
     if isinstance(value, (bytes, bytearray, memoryview)):
@@ -2536,9 +2549,10 @@ def _read_element(ds, tag, little_endian=True):
     # `AttributeError` that is an inference: it raised, so neither the
     # item nor any ancestor that propagated a `_pixel_rep` into it
     # declares Pixel Representation. Its `TypeError` (#703) says nothing
-    # about Pixel Representation, and needs nothing said: it is raised
-    # only for LUT Data, whose arm reads the descriptor and never the
-    # representation, and a LUT's descriptor is in the LUT's own item.
+    # about Pixel Representation, and needs nothing said: it is taken
+    # for unresolved only for LUT Data and the `OB or OW` waveform tags
+    # (#972), whose arms read the descriptor or Waveform Bits Allocated
+    # off the element's own item and never the representation.
     # The inference holds only because every item carries the
     # `_pixel_rep` its ancestors imply: pydicom stamps it when it reads an
     # `SQ`, and `populate_attrs` stamps the items `_sequence_from_un_bytes`
@@ -11810,19 +11824,36 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows,
     unresolved = False
     try:
         correct_ambiguous_vr_element(elem, ds, little_endian, ancestors)
-    except (AttributeError, TypeError):
+    except AttributeError:
         # pydicom's wrapped raise: the sibling its rule reads is absent
         # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
+        unresolved = True
+    except TypeError:
+        # #703 and #972 (ruled 2026-10-07: narrow in v1.1). Two arms of
+        # pydicom 3.0.2's resolver raise `TypeError` when the sibling
+        # they decide from is there and holds a value they cannot use:
+        # LUT Data's subscript of a LUT Descriptor holding no value (None)
+        # or one (an int), and the `OB or OW` waveform arm's
+        # `WaveformBitsAllocated > 8` against a zero-length (None) or
+        # text sibling. Both are "the decider cannot decide", so both are
+        # unresolved and take the arms below, as they did before #972.
+        # Its wrapper does not re-raise it, so until #703 it reached
+        # `_resolve_ambiguous_vrs`' `except Exception` and the element
+        # was dropped with a row in pydicom's words.
         #
-        # `TypeError` (#703): the sibling is there and pydicom cannot
-        # subscript it -- LUT Data beside a LUT Descriptor holding no
-        # value (None) or one (an int), the only arm of pydicom 3.0.2's
-        # resolver that subscripts. Its wrapper does not re-raise it, so
-        # until #703 it reached `_resolve_ambiguous_vrs`' `except
-        # Exception` and the table was dropped with a row in pydicom's
-        # words. `TypeError` and no wider: anything else is not "the
-        # decider cannot decide" and keeps that route. Re-read
-        # `_correct_ambiguous_vr_element` on every pydicom bump.
+        # The other arm that can raise it is `US or SS`, which converts
+        # the value: there the `TypeError` is a value pydicom could not
+        # convert (a `timedelta64` was the one measured), and taking it
+        # for unresolved wrote that value under a VR it had never been
+        # asked about. So it is re-raised, and that same
+        # `except Exception` makes it this element's row. Keyed on the
+        # tag, never on pydicom's message. A zero-length Waveform Bits
+        # Allocated reaches the waveform arm from a source file (X5
+        # review), which is why it is not narrowed to LUT Data alone.
+        # Re-read `_correct_ambiguous_vr_element` on every pydicom bump.
+        if (elem.tag != _LUT_DATA_TAG
+                and elem.tag not in _AMBIGUOUS_WAVEFORM_TAGS):
+            raise
         unresolved = True
     if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
         # pydicom answered, so what it answered is what the header names
@@ -12376,16 +12407,6 @@ def _standard_un_decoded(elem, encoding):
         return None
 
 
-#: The member types of a list `_export_value` has nothing to do for: the
-#: plain Python ones, and pydicom's `DSfloat` and `IS`, which is what a
-#: reopened store hands back for every multi-valued DS and IS and which
-#: are never converted. Exact types, never `isinstance`: `Decimal` and a
-#: numpy number must not be in it, and a `DSdecimal` is rare enough to
-#: take the slow path, which returns it untouched as well.
-_PLAIN_TYPES = frozenset({int, float, str, bool, type(None),
-                          pydicom.valuerep.DSfloat, pydicom.valuerep.IS})
-
-
 def _float_of(member):
     """A `Decimal` a float can hold as that `float`; anything else itself."""
     # Two tests, and each has a value only it catches. `is_finite()` first,
@@ -12410,7 +12431,9 @@ def _export_value(value):
     by a `list` or `tuple`), a `tuple` becomes the `list` it equals, and a
     `Decimal` a float can hold, alone or directly in a list, becomes that
     `float` (a non-finite one, and one past a float's range, stays a
-    `Decimal`). Everything else is returned **as the same object**: a source's
+    `Decimal`), and a `bytearray`, alone or directly in a list, becomes
+    the `bytes` it equals. Everything else is returned **as the same
+    object**: a source's
     `DSfloat`, `IS` and `DSdecimal` (so `original_string` survives),
     `MultiValue`, bytes, a list of plain Python values, and the numpy
     values #926 says are not numbers. Never raises.
@@ -12459,6 +12482,12 @@ def _export_value(value):
     # - **The tuple stays a tuple in the graph** (#926 pins `set_attr`
     #   storing the object given); the store already writes it as a list,
     #   and this is the exporter agreeing with the store.
+    # - **A `bytearray` is the `bytes` it equals** (X5): `bytearray(b'AB')
+    #   == b'AB'`. Handed to pydicom as it was, it failed the whole file
+    #   under 13 text VRs (pydicom iterates it as ints) and was written
+    #   `65\66` under IS and DS, while the same bytes were written as
+    #   given. Exact type, as for the rest: a caller's subclass of
+    #   `bytearray` takes the answer it always had.
     # - **The first test is only a fast path**, and no export can show
     #   it go: without it the answer is the same and slower. A reopened
     #   store hands back a plain list for a multi-valued element, 65,536
@@ -12466,30 +12495,44 @@ def _export_value(value):
     #   two scans below cost about 6 ms on such a list where one C-level
     #   pass over its types costs 0.5 ms (measured in the PR for #938). `type(value) is list`, because a
     #   tuple must still be converted; an allowlist, so a type nobody
-    #   thought of takes the slow path, never the wrong one.
-    if type(value) is list and set(map(type, value)) <= _PLAIN_TYPES:
+    #   thought of takes the slow path, never the wrong one. The set is
+    #   `entities._PLAIN_TYPES`, which `_python_value` reads too (#1004).
+    if type(value) is list and set(map(type, value)) <= entities._PLAIN_TYPES:
         return value
     value = _python_value(value)
     if type(value) is tuple:
         value = list(value)
     if type(value) is Decimal:
         return _float_of(value)
-    if type(value) is list and any(type(member) is Decimal for member in value):
-        return [_float_of(member) for member in value]
+    if type(value) is bytearray:
+        return bytes(value)
+    if type(value) is list and any(type(member) in (Decimal, bytearray)
+                                   for member in value):
+        return [_bytes_or_float_of(member) for member in value]
     return value
 
 
-def _one_tag(given, value):
+def _bytes_or_float_of(member):
+    """A `bytearray` as the `bytes` it equals; anything else as
+    `_float_of` hands it back."""
+    return bytes(member) if type(member) is bytearray else _float_of(member)
+
+
+def _one_tag(given, value, *, private=False):
     """Under `AT`: `value`, or the 2-tuple `given` was when it names one tag.
 
     Args:
         given: The value as the graph holds it.
         value: `_export_value(given)`.
+        private: True for a private tag whose recorded VR is `AT`. There
+            any 2-tuple of two integers stays the tuple, with no 16-bit
+            bound, as before X5 (owner ruling Q5b; #1201).
 
     Returns:
-        `tuple(value)` when `given` is exactly a `tuple` of two parts
-        that are both integers (numpy ones as their Python twins) or both
-        `str`; `value` otherwise.
+        `tuple(value)` when `entities._one_tag_of(given)` names one tag:
+        `given` is exactly a `tuple` of two integers from 0 to 0xFFFF
+        (numpy ones as their Python twins) or of two `str`. `value`
+        otherwise.
     """
     # Owner ruling on #1009 (finding 2). `(0x0018, 0x1063)` is pydicom's
     # ordinary spelling of ONE tag, and `[0x0018, 0x1063]` of two,
@@ -12499,23 +12542,41 @@ def _one_tag(given, value):
     #
     # - **Whatever pydicom reads as one tag stays one tag** (owner ruling
     #   on the delta review of #1009, finding 4): pydicom's `Tag` takes a
-    #   pair when "both arguments [are] the same type and str or int".
-    #   So `isinstance`, not `type(...) is`: `(MyIntEnum.GROUP, 0x1063)`
-    #   and `(True, 7)` are pairs of integers, and `("0018", "1063")` is
-    #   the hex-string pair. Each was one tag before this function and
-    #   two wrong ones, with no row, under an exact-`int` test.
+    #   pair when "both arguments [are] the same type and str or int",
+    #   and each half is at most 0xFFFF. So `isinstance`, not
+    #   `type(...) is`: `(MyIntEnum.GROUP, 0x1063)` and `(True, 7)` are
+    #   pairs of integers, and `("0018", "1063")` is the hex-string pair.
+    # - **A pair of full tags is two tags** (X5, #1026). Pydicom does not
+    #   read `(BaseTag(0x00181063), BaseTag(0x00181064))` as one tag: it
+    #   refused it (`OverflowError`) and the element was dropped, while
+    #   the list it equals wrote both tags. The 16-bit bound makes it
+    #   that list.
+    # - **One question, asked by the store too** (#1016):
+    #   `entities._one_tag_of` is the test, so the store saves exactly
+    #   the pairs this function keeps, as the one tag each names, and a
+    #   reopened export writes the tag the live one writes.
     # - **Every other tuple is the list it equals**, as under every other
     #   VR: a tuple of 2-tuples (several tags either way), a 3-tuple, a
-    #   pair of floats, a mixed pair.
+    #   pair of floats, a mixed pair. The AT gate
+    #   (`_refuse_what_the_vr_cannot_hold`) then refuses what names no
+    #   tag.
+    # - **A `str` pair is kept whether or not pydicom can read it**, as
+    #   it always was: pydicom then raises inside `_merge`'s `try`.
     # - **Read from `value`**, so `(np.uint16(0x18), np.uint16(0x1063))`
     #   is the tag its twin is; pydicom refuses the numpy pair itself.
-    # - **A reopened store is not covered**: it holds `[24, 4195]` for a
-    #   2-tuple it saved (JSON has no tuple), and exports two tags. That
-    #   is the store's spelling to fix, not the exporter's to guess at:
-    #   a list of two ints is also how two group-0000 tags are spelled.
-    if (type(given) is tuple and len(given) == 2 and type(value) is list
-            and (all(isinstance(part, int) for part in value)
-                 or all(isinstance(part, str) for part in value))):
+    # - **A private tag recorded AT is not changed** (owner ruling Q5b,
+    #   filed as #1201; brief section 8 item 5). There every pair of two
+    #   integers stays the tuple, so the recorded-VR gate refuses it and
+    #   it is written as LO text under the re-VR row, as it always was.
+    #   The 16-bit bound is the standard arm's alone: shared, it wrote a
+    #   pair of full tags, or a pair with a half past 0xFFFF, under AT
+    #   with no row (X5 review).
+    if type(given) is not tuple or len(given) != 2 or type(value) is not list:
+        return value
+    if private and all(isinstance(part, int) for part in value):
+        return tuple(value)
+    if (_one_tag_of(given) is not None
+            or all(isinstance(part, str) for part in value)):
         return tuple(value)
     return value
 
@@ -12539,23 +12600,77 @@ _TEXT_VRS = frozenset({"AE", "AS", "CS", "DA", "DT", "TM", "LO", "LT", "PN",
                        "SH", "ST", "UC", "UI", "UR", "UT"})
 
 
-#: A plain number, by its exact type. Not `numbers.Number`: pydicom's
-#: `DSfloat`, `IS`, `ISfloat` and `DSdecimal` are numbers to that test and
-#: carry a file's own text (see `_refuse_a_number_as_text`).
-_CALLERS_NUMBERS = frozenset({int, float, bool, complex, Decimal, Fraction})
+#: pydicom's value classes that carry a file's own text in
+#: `original_string`: what ingest hands back for an element the file
+#: wrote under IS or DS, live and, through #662's tagged text, after a
+#: reopen. Exact types (`type(...) in`): a caller's subclass is not one.
+_FILES_NUMBER_TYPES = frozenset({pydicom.valuerep.IS, pydicom.valuerep.ISfloat,
+                                 pydicom.valuerep.DSfloat,
+                                 pydicom.valuerep.DSdecimal})
+
+
+def _carries_the_files_text(atom) -> bool:
+    """Whether `atom` is one of pydicom's IS or DS values holding the text
+    a file wrote (a `str` `original_string`)."""
+    return (type(atom) in _FILES_NUMBER_TYPES
+            and isinstance(getattr(atom, "original_string", None), str))
+
+
+def _file_text_under_a_text_vr(vr, value):
+    """`value`, with each of pydicom's IS or DS values that carries a
+    file's text replaced by that text, under a text VR (#1017).
+
+    Args:
+        vr (str): The element's VR.
+        value: The value, after `_export_value`.
+
+    Returns:
+        `value` itself when `vr` is not in `_TEXT_VRS` or nothing is
+        replaced; otherwise the text, or a new list.
+    """
+    # #1017, owner ruling Q3 (2026-11-22): one rule for all fifteen text
+    # VRs. A file that wrote a text tag under IS or DS hands ingest an
+    # `IS` or a `DSfloat` carrying the file's own text. pydicom's DA, DT
+    # and TM writers write that text; under the other twelve the value
+    # failed the whole file at `dcmwrite` (`object of type 'IS' has no
+    # len()`) or, under PN and UI, was lost in pydicom's words. The
+    # tie-breaker's closest honest output is the file's own text, written
+    # under the dictionary's VR with no row, as DA, DT and TM already
+    # were; under those three the bytes are the same.
+    #
+    # - **Only with a `str` `original_string`.** `IS(7)` or `DSfloat(1.5)`
+    #   built in code carries none, is a caller's number, and is the text
+    #   gate's to refuse.
+    # - **One level deep**, as the rest of `_merge`'s readers. A
+    #   `MultiValue` of them becomes a list of text.
+    # - **Never writes `attrs`**: it rebinds `_merge`'s local.
+    if vr not in _TEXT_VRS:
+        return value
+    if isinstance(value, (list, MultiValue)):
+        if not any(_carries_the_files_text(atom) for atom in value):
+            return value
+        return [atom.original_string if _carries_the_files_text(atom)
+                else atom for atom in value]
+    if _carries_the_files_text(value):
+        return value.original_string
+    return value
 
 
 def _refuse_a_number_as_text(vr, value):
     """Raise when `value`, about to be written under text VR `vr`, holds a
-    plain number.
+    number, or a list member that is several values.
 
     Each atom (the value, or each member of a `list` or `MultiValue`) is
-    refused when its type is exactly `int`, `float`, `bool`, `complex`,
-    `Decimal` or `Fraction`, or when it is a numpy scalar that is not text
-    or a numpy array that is neither empty nor an array of text.
-    Everything else passes,
-    as it always has: text, bytes, `None`, pydicom's `PersonName`, a
-    `date` in a DA, and pydicom's `DSfloat`, `IS` and `DSdecimal`.
+    refused when it is a number (`numbers.Number`: a caller's `int`,
+    `float`, `bool`, `complex`, `Decimal` or `Fraction`, a subclass of
+    one such as an `IntEnum`, and pydicom's `IS` or `DSfloat` built in
+    code), or a numpy scalar that is not text, or a numpy array that is
+    neither empty nor an array of text. Under a 1-n text VR, a member of
+    a list that is a `str` holding a backslash is refused too. Everything
+    else passes, as it always has: text, bytes, `None`, pydicom's
+    `PersonName`, a `date` in a DA, and pydicom's IS and DS values that
+    carry a file's text (`_file_text_under_a_text_vr` has made those
+    text before `_merge` asks).
 
     Args:
         vr (str): One of `_TEXT_VRS`.
@@ -12576,33 +12691,33 @@ def _refuse_a_number_as_text(vr, value):
     # - **The type only.** Not `_value_fits_vr`: its caps and format
     #   checks would drop source values that export today (an LO past 64
     #   characters, a DA that names no date).
-    # - **A caller's number by its exact type, never `numbers.Number`**
-    #   (review of #1009). A file that wrote Acquisition Time under `DS`
-    #   hands ingest a `DSfloat`: a number to `isinstance`, and the
-    #   file's own text to pydicom's DA, DT and TM writers, which write
-    #   its `original_string`. Refused here, a source's own element was
-    #   lost that had always been written. So pydicom's own value
-    #   classes (`IS`, `DSfloat`, `DSdecimal`) are never this gate's,
-    #   under any text VR, and export as they did before the gate:
-    #   written under DA, DT and TM, the element lost with pydicom's
-    #   sentence under PN and UI, and the whole file failed under the
-    #   other ten (`object of type 'IS' has no len()`; #1017, not made
-    #   an element's loss here).
+    # - **`numbers.Number`, with one exemption** (X5, #986's subclass
+    #   half). The exact-type test this replaced could not tell a
+    #   caller's `IntEnum` from pydicom's `IS`, so the subclass passed
+    #   and failed the whole file at `dcmwrite`, while the same store
+    #   reopened held the plain number and lost one element. The
+    #   exemption is a value that carries a file's text
+    #   (`_carries_the_files_text`): review of #1009 found a file that
+    #   wrote Acquisition Time under `DS` losing an element that had
+    #   always been written. Since #1017 such a value reaches here as
+    #   its text; the exemption keeps this function's answer the same
+    #   for a direct caller.
     # - **A file's own US, SS, UL, SL, FL or FD value IS this gate's**
     #   (owner ruling of 2026-10-09). pydicom builds a plain `int` or
     #   `float` for those, ingest records a wire VR for odd groups only,
     #   and the store writes a bare number: after ingest, and after a
     #   reopen, nothing in the graph tells a file that stated `US 42`
-    #   for an LO tag from `set_attr(tag, 42)` (measured in the PR). So
-    #   it loses that one element under this row, as a caller's number
-    #   does, where the whole file failed before the gate. #1017 holds
-    #   both halves of "a file's own number under a text tag".
-    # - **A caller's own subclass of `int` or `float` passes too**, an
-    #   `IntEnum` say, because the exact-type test cannot tell it from
-    #   pydicom's. It then fails the whole file at `dcmwrite`, as it
-    #   always did, while the same store reopened holds the plain number
-    #   and loses the one element: live and reopened disagree here, and
-    #   that is left with #986.
+    #   for an LO tag from `set_attr(tag, 42)` (measured in the PR for
+    #   #1009). So it loses that one element under this row, as a
+    #   caller's number does, where the whole file failed before the gate.
+    # - **A member holding a backslash is several values** (#1014, owner
+    #   ruling Q6). `["A\\B", "C"]` under LO was written as three values
+    #   where the graph holds two members, with no row. A bare `str`
+    #   holding a backslash is still the caller's multi-value spelling,
+    #   and a VM-1 VR (`_VM_ONE_TEXT_VRS`) holds a backslash as text.
+    #   `bytes` are the wire value and are not looked into (owner ruling
+    #   Q2). No configuration reaches it: a REPLACE value is one `str`,
+    #   and SCRUB removes text and adds no backslash.
     # - **`str` and `bytes` are tested first**: `np.str_` and `np.bytes_`
     #   are text and an `np.generic` at once.
     # - **An array of text is text** (delta review of #1009, finding 5):
@@ -12620,17 +12735,214 @@ def _refuse_a_number_as_text(vr, value):
     #   or UID, and `'True'` is nobody's Code String.
     # - **No value in the message.** The row is read by people the value
     #   may not be for; the tag, the type and the VR locate it.
-    atoms = value if isinstance(value, (list, MultiValue)) else (value,)
+    several = isinstance(value, (list, MultiValue))
+    atoms = value if several else (value,)
     for atom in atoms:
-        if isinstance(atom, (str, bytes)):
+        if isinstance(atom, str):
+            if several and "\\" in atom and vr not in _VM_ONE_TEXT_VRS:
+                raise TypeError(
+                    f"a member holding a backslash is several values, and "
+                    f"{vr} holds one per member")
+            continue
+        if isinstance(atom, bytes):
             continue
         if isinstance(atom, np.ndarray) and (
                 atom.size == 0 or _is_an_array_of_text(atom)):
             continue
-        if (type(atom) in _CALLERS_NUMBERS
-                or isinstance(atom, (np.generic, np.ndarray))):
+        if _carries_the_files_text(atom):
+            continue
+        if isinstance(atom, (numbers.Number, np.generic, np.ndarray)):
             raise TypeError(f"a {type(atom).__name__} is not text, and {vr} "
                             f"holds text")
+
+
+#: The six binary VRs, derived from the word table so there is one list.
+_BINARY_VRS = frozenset(_BINARY_VR_WORD)
+
+#: The `struct` format pydicom's writer packs each integer VR with, beside
+#: `_INTEGER_VR_RANGE`, so the gate asks the writer's own question.
+_INTEGER_VR_PACK = {'US': '<H', 'SS': '<h', 'UL': '<L', 'SL': '<l',
+                    'UV': '<Q', 'SV': '<q'}
+
+#: A tag's range, and the largest group or element of a pair.
+_AT_MAX, _AT_HALF_MAX = 0xFFFFFFFF, 0xFFFF
+
+
+def _is_zero_length(value) -> bool:
+    """Whether `value` is written as the zero-length element: `None`, or
+    an empty `str`, `bytes`, `memoryview`, `list`, `tuple` or
+    `MultiValue`."""
+    return value is None or (
+        isinstance(value, (str, bytes, memoryview, list, tuple, MultiValue))
+        and len(value) == 0)
+
+
+def _refuse_what_the_vr_cannot_hold(vr, value):
+    """Raise when `value`, about to be written under standard VR `vr`, is
+    one the VR cannot hold.
+
+    - Under a text VR: `_refuse_a_number_as_text`.
+    - The zero-length element (`None`, `''`, `[]`) always passes.
+    - A numpy value that is not a number (an array, a `datetime64`, a
+      `timedelta64`, a complex or masked value) is refused under every
+      other VR. `np.str_` and `np.bytes_` are `str` and `bytes`, and are
+      judged as those.
+    - OB, OW, OF, OD, OL and OV hold `bytes` or a `memoryview`.
+    - US, SS, UL, SL, UV and SV hold integers in the VR's range.
+    - FL and FD hold numbers their `struct` format packs.
+    - AT holds tags: an `int` (not a `bool`) from 0 to 0xFFFFFFFF, a `str`
+      (pydicom reads it), or a pair of integers from 0 to 0xFFFF or of
+      `str`.
+    - IS, DS and the ambiguous VRs have arms of their own in `_merge`;
+      only the numpy rule is asked here.
+
+    Args:
+        vr (str): The VR about to be written, from the dictionary.
+        value: The value, after `_export_value`.
+
+    Raises:
+        TypeError: The value, or an atom of it, is not of a type the VR
+            holds. Names the type and the VR, never the value.
+        ValueError: An integer outside the VR's range, or a number too
+            large for FL or FD. Names the type and the VR, never the
+            value.
+    """
+    # The owner's tie-breaker (ruling of 2026-11-20 on #1018): what the
+    # exporter cannot write faithfully costs that element under one row,
+    # never the file. Raised inside `_merge`'s per-element `try`, so it
+    # becomes that element's `DATA_LOSS` row. pydicom accepts each value
+    # refused here at `add_new` and raises in `dcmwrite`, past that
+    # `try`, so the whole file failed; or it wrote a value that is not
+    # the one held, with no row. Since #1197 a plugin is handed the
+    # dataset `_merge` built, so without this it was handed the element.
+    #
+    # - **The writer's own question.** The integer and float families ask
+    #   `struct.pack` with the format pydicom's writer uses, all atoms in
+    #   one call, and walk the atoms only to name the refusal: a 65,536
+    #   entry plain list costs one pass over its types and one pack. Not `_value_fits_vr`: it refuses `bool`,
+    #   every tuple, and reads AT as an integer VR, and this arm writes
+    #   all three today.
+    # - **A numpy value that is not a number** (#1000): `_export_value`
+    #   has made every numpy number its Python twin, so what is left is
+    #   one `.item()` would misread. pydicom wrote `timedelta64` as its
+    #   count, `np.ma.masked` as `nan`, a `complex64` as 0, and any array
+    #   under a binary VR as its buffer. Owner ruling Q1 (2026-11-22): an
+    #   array under a binary VR is refused too; the caller passes
+    #   `.tobytes()`, which says which bytes.
+    # - **A binary VR holds bytes** (#1018): a number, a `str`, a list,
+    #   a `bool` failed the file. A `bytearray` reaches here as `bytes`
+    #   (`_export_value`).
+    # - **An integer VR holds integers** (#986): `isinstance(atom, int)`,
+    #   so `bool`, an `IntEnum` and a `BaseTag` pass, as they were
+    #   written. A whole `float` is refused: pydicom's writer refuses
+    #   `7.0`. Out of range is a `ValueError` naming the VR's range,
+    #   which is no secret.
+    # - **A float VR holds numbers** (#986): what `struct` packs. An int
+    #   FL rounds (16777217) and a double FL rounds are FL's nature and
+    #   are written as before.
+    # - **AT holds tags** (#1026): a float, a `bool`, `None` or a
+    #   container of another length was written as group-0000 tags or
+    #   failed the file. A lone `bool` is refused; inside a pair it is an
+    #   integer, as #1009's delta ruling said of `(True, 7)`. A group-0000
+    #   integer is a tag (owner ruling Q4) and is written as it spells.
+    # - **No configuration reaches this** (measured for X5): a value-less
+    #   REPLACE on a numeric VR is refused at load, AT is always refused,
+    #   basic@2026c puts only REMOVE or bytes dummies on these VRs, and
+    #   EMPTY's `''` is the zero-length element. So `CONFIG_VERSION`
+    #   stays where it is.
+    if vr in _TEXT_VRS:
+        _refuse_a_number_as_text(vr, value)
+        return
+    if _is_zero_length(value):
+        return
+    atoms = value if isinstance(value, (list, MultiValue)) else (value,)
+    # A plain list (a reopened store's LUT, say) holds no numpy value, and
+    # one C-level pass over its types says so: the per-member test cost
+    # about 7 ms on a 65,536-entry list. Only a fast path; the answer is
+    # the same without it.
+    if not (type(value) is list
+            and set(map(type, value)) <= entities._PLAIN_TYPES):
+        for atom in atoms:
+            if _is_a_numpy_leftover(atom):
+                raise TypeError(f"a {type(atom).__name__} is not a value "
+                                f"{vr} can hold")
+    if vr in _BINARY_VRS:
+        if not isinstance(value, (bytes, memoryview)):
+            raise TypeError(f"a {type(value).__name__} is not bytes, and "
+                            f"{vr} holds bytes")
+    elif vr in _INTEGER_VR_PACK:
+        _refuse_what_does_not_pack(vr, atoms, _INTEGER_VR_PACK[vr])
+    elif vr in _FLOAT_VR_PACK:
+        _refuse_what_does_not_pack(vr, atoms, _FLOAT_VR_PACK[vr])
+    elif vr == "AT":
+        for atom in atoms:
+            _refuse_what_names_no_tag(atom)
+
+
+def _is_a_numpy_leftover(atom) -> bool:
+    """Whether `atom` is a numpy value that is not a number: an array
+    (masked or not, of any dimension), or a scalar whose dtype is not a
+    bool, an integer or a float. `np.str_` and `np.bytes_` are text."""
+    # A numpy number `_export_value` left as it was is a `longdouble`
+    # whose `.item()` is itself on some platforms (#926's twin-type
+    # test). It is a number, and the family arms judge it as one, as
+    # they did: IS, DS and FD wrote it, and still do.
+    if isinstance(atom, (str, bytes)):
+        return False
+    if isinstance(atom, np.ndarray):
+        return True
+    return isinstance(atom, np.generic) and \
+        atom.dtype.kind not in entities._NUMPY_NUMBER_KINDS
+
+
+def _refuse_what_does_not_pack(vr, atoms, fmt):
+    """Raise unless `struct` packs every atom with `fmt`, the format
+    pydicom's writer uses for integer or float VR `vr`."""
+    try:
+        struct.pack(f"{fmt[0]}{len(atoms)}{fmt[1]}", *atoms)
+        return
+    except (struct.error, TypeError, ValueError, OverflowError):
+        pass
+    if vr in _INTEGER_VR_RANGE:
+        low, high = _INTEGER_VR_RANGE[vr]
+        for atom in atoms:
+            if not isinstance(atom, int):
+                raise TypeError(f"a {type(atom).__name__} is not an integer, "
+                                f"and {vr} holds integers")
+            if not low <= atom <= high:
+                raise ValueError(f"an int outside {vr}'s range, {low} to "
+                                 f"{high}")
+        return
+    for atom in atoms:
+        try:
+            struct.pack(fmt, atom)
+        except (struct.error, TypeError, ValueError, OverflowError):
+            # An `int` or a `float` that does not pack is past the
+            # format's range (`struct` says so as `OverflowError` for a
+            # float and as `struct.error` for an int past a double's).
+            if isinstance(atom, (int, float)):
+                raise ValueError(f"a {type(atom).__name__} too large for "
+                                 f"{vr}") from None
+            raise TypeError(f"a {type(atom).__name__} is not a number, and "
+                            f"{vr} holds numbers") from None
+
+
+def _refuse_what_names_no_tag(atom):
+    """Raise unless `atom` is one of AT's spellings of a tag."""
+    if isinstance(atom, str):
+        # pydicom reads it, and raises inside `_merge`'s `try` when it
+        # cannot, as it always did.
+        return
+    if isinstance(atom, int) and not isinstance(atom, bool):
+        if not 0 <= atom <= _AT_MAX:
+            raise ValueError(f"an int outside AT's range, 0 to {_AT_MAX}")
+        return
+    if isinstance(atom, (tuple, list)) and len(atom) == 2 and (
+            all(isinstance(part, numbers.Integral)
+                and 0 <= part <= _AT_HALF_MAX for part in atom)
+            or all(isinstance(part, str) for part in atom)):
+        return
+    raise TypeError(f"a {type(atom).__name__} is not a tag, and AT holds tags")
 
 
 #: PS3.5 Table 6.2-1: a Decimal String value is at most 16 characters.
@@ -13676,11 +13988,17 @@ class DicomExporter:
         #   item's Patient ID is no owner's to stamp, its row has the
         #   same text, and `_merge` dedupes by text: taken out any later,
         #   the instance's row would have swallowed the item's first.
+        # - **The backslash row under every text VR, PN and UI included**
+        #   (X5, #1014). A list member holding a backslash was written and
+        #   then stamped over, with no row, under all fifteen; its row is
+        #   new, so it is taken out wherever the owner stamps.
         # - **Matched on the row's own prefix**, the one `_merge` writes.
         stamped = tuple(f"Tag {tag} not exported" for attrs in stamps
                         for tag in attrs)
         gates = tuple(f"is not text, and {vr} holds text"
-                      for vr in sorted(_TEXT_VRS - {"PN", "UI"}))
+                      for vr in sorted(_TEXT_VRS - {"PN", "UI"})) + tuple(
+            f"several values, and {vr} holds one per member"
+            for vr in sorted(_TEXT_VRS))
         losses[start:] = [row for row in losses[start:]
                           if not (row[1].startswith(stamped)
                                   and row[1].endswith(gates))]
@@ -13779,9 +14097,10 @@ class DicomExporter:
             # arms above `continue` before this; they take `str` and
             # bytes only.
             given, v = v, _export_value(v)
-            vr, encoded, re_vr = None, None, None
+            vr, encoded, re_vr, standard = None, None, None, False
             try:
                 vr = dictionary_VR(Tag(g, e))
+                standard = True
                 if vr == 'AT':
                     v = _one_tag(given, v)
             except Exception:
@@ -13803,7 +14122,7 @@ class DicomExporter:
                 if recorded == 'AT':
                     # One tag stays the 2-tuple it was, here too; the
                     # recorded-VR gate then refuses it as it always did.
-                    v = _one_tag(given, v)
+                    v = _one_tag(given, v, private=True)
                 if v is None or (isinstance(v, (list, tuple, MultiValue))
                                  and len(v) == 0):
                     # A zero-length element: the source asserted the
@@ -13856,14 +14175,18 @@ class DicomExporter:
                 # re-encoded silently instead of reported.
                 if vr is not None:
                     vr = _numeric_arm(vr, v)
-                # A number under a standard text VR is this element's
-                # DATA_LOSS row (#939); pydicom would take it here and
-                # fail the whole file at `dcmwrite`. On the standard arm
-                # only (`encoded` is None): a private tag's number is
-                # written as text by the fallback encoder, and a recorded
-                # private VR was already asked by `_value_fits_vr`.
-                if vr in _TEXT_VRS and encoded is None:
-                    _refuse_a_number_as_text(vr, v)
+                # A value its standard VR cannot hold is this element's
+                # DATA_LOSS row (#939, #986, #1000, #1018, #1026): pydicom
+                # would take it here and fail the whole file at
+                # `dcmwrite`, or write a value that is not the one held.
+                # A file's own IS or DS under a text VR is its text first
+                # (#1017). On the dictionary's arm only (`standard`): a
+                # private tag's value is written by the fallback encoder,
+                # and a recorded private VR was already asked by
+                # `_value_fits_vr`.
+                if standard:
+                    v = _file_text_under_a_text_vr(vr, v)
+                    _refuse_what_the_vr_cannot_hold(vr, v)
                 # A caller's float in a standard DS, spelled to fit its 16
                 # characters (#723). Here, inside the loss arm's `try`, so
                 # a non-finite float is this element's DATA_LOSS row; and

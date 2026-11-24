@@ -55,6 +55,65 @@ _NUMPY_NUMBER_KINDS = "biuf"
 #: in`, so a subclass is never one of them.
 _NUMPY_TWIN_TYPES = (bool, int, float)
 
+#: The member types of a list that `_python_value` and the exporter's
+#: `_export_value` have nothing to do for: the plain Python ones, and
+#: pydicom's `DSfloat` and `IS`, which is what a reopened store hands back
+#: for every multi-valued DS and IS and which are never converted. Exact
+#: types, never `isinstance`: `Decimal` and a numpy number must not be in
+#: it, and a `DSdecimal` is rare enough to take the slow path, which
+#: returns it untouched as well. One spelling: `io_handlers` reads this
+#: one (#1004).
+_PLAIN_TYPES = frozenset({int, float, str, bool, type(None),
+                          pydicom.valuerep.DSfloat, pydicom.valuerep.IS})
+
+#: The largest group or element number: a tag is two 16-bit halves.
+_TAG_HALF_MAX = 0xFFFF
+
+
+def _one_tag_of(value):
+    """The one tag a 2-tuple names under `AT`, as an `int`, or None.
+
+    A `tuple` of exactly two parts names one tag when both parts are
+    integers from 0 to 0xFFFF (numpy ones as their Python twins; a `bool`
+    and an `IntEnum` are integers) or both are `str` that pydicom reads as
+    one tag (`("0018", "1063")`). Anything else names no one tag: a list,
+    another length, a float, `None`, and a pair of full tags such as
+    `(BaseTag(0x00181063), BaseTag(0x00181064))`.
+
+    Args:
+        value: An attribute value, as the graph holds it.
+
+    Returns:
+        Optional[int]: The tag, or None.
+    """
+    # #1016, owner ruling Q5a (2026-11-22). The exporter (`_one_tag`) and
+    # the store (`SqliteStore._serialize_item`) both ask this, so the two
+    # cannot disagree: a pair the live export writes as one tag is saved
+    # as that tag, and a reopened store writes it the same.
+    #
+    # - **Exactly `tuple`**, never `isinstance`: a list of two integers
+    #   is pydicom's spelling of two group-0000 tags (owner ruling Q4),
+    #   and a namedtuple is not this shape.
+    # - **The 16-bit bound** is pydicom's own: its `Tag` refuses a pair
+    #   whose half is past 0xFFFF (`OverflowError`). Without it a pair of
+    #   full tags was taken for one and dropped under a row, where its
+    #   list wrote two tags (#1026).
+    # - **`isinstance(part, int)`** for the halves, as #1009's delta
+    #   ruling said: `(True, 7)` and `(IntEnum, int)` are one tag each.
+    if type(value) is not tuple or len(value) != 2:
+        return None
+    parts = _python_value(value)
+    if all(isinstance(part, int) for part in parts):
+        if all(0 <= part <= _TAG_HALF_MAX for part in parts):
+            return (int(parts[0]) << 16) | int(parts[1])
+        return None
+    if all(isinstance(part, str) for part in parts):
+        try:
+            return int(pydicom.tag.Tag(parts))
+        except (ValueError, TypeError, OverflowError):
+            return None
+    return None
+
 
 def _python_value(value):
     """`value`, with a numpy number replaced by the Python number it equals.
@@ -107,8 +166,18 @@ def _python_value(value):
     #   which reads one tag only from an exact `tuple`, saw a list of two
     #   integers and wrote two group-0000 tags with no row. The store
     #   still holds a list (JSON has no tuple), so under `AT` a reopened
-    #   export writes two tags where the live one writes one: #1016's
-    #   shape, the same as for a tuple of plain integers.
+    #   export writes two tags where the live one writes one. #1016: the
+    #   store now saves such a pair under a standard `AT` as the one tag
+    #   it names (`_one_tag_of`), and leaves the graph's tuple alone.
+    # - **The first test is only a fast path** (#1004), and nothing can
+    #   show it go: a plain list is returned as itself either way. A
+    #   reopened store or a LUT hands a list of 65,536 plain members,
+    #   and the scan below cost 4.6 ms on 3.12 and 5.1 ms on 3.14t per
+    #   such list, where one C-level pass over its types costs 0.5 and
+    #   0.6 ms. `type(value) is list`: a tuple must still be scanned
+    #   (#1173), and a `MultiValue` never is.
+    if type(value) is list and set(map(type, value)) <= _PLAIN_TYPES:
+        return value
     if isinstance(value, np.generic) or (
             isinstance(value, np.ndarray) and value.ndim == 0):
         if (value.dtype.kind not in _NUMPY_NUMBER_KINDS

@@ -29,12 +29,14 @@ from datetime import date, datetime
 from contextlib import nullcontext
 
 from pydicom import config as pydicom_config
+from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
 from pydicom.valuerep import DSdecimal, DSfloat, IS, ISfloat
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
                        PhiStatus, ScanPolicy, normalize_study_date,
-                       resolve_item_path, iter_item_tree, _python_value)
+                       resolve_item_path, iter_item_tree, _python_value,
+                       _one_tag_of)
 from . import entities
 from .blob_kind import parse_blob_kind, serialize_blob_kind
 from .sidecar import SidecarManager
@@ -827,6 +829,43 @@ def _is_private_tag(key) -> bool:
         return int(key.split(',')[0], 16) % 2 != 0
     except (ValueError, AttributeError):
         return False
+
+
+def _pairs_as_the_tags_they_name(data: Dict[str, Any]) -> None:
+    """Replace, in `data`, each standard `AT` value that is a 2-tuple
+    naming one tag with that tag as an `int` (#1016).
+
+    Args:
+        data (dict): A copy of an item's attributes, edited in place.
+    """
+    # Owner ruling Q5a (2026-11-22). JSON has no tuple, so the store
+    # saved `(0x0018, 0x1063)` as `[24, 4195]`, which a reopened export
+    # writes as the two tags `(0000,0018)` and `(0000,1063)`, with no row
+    # and PASS, where the live export wrote the one tag. Saved as the
+    # integer, it reopens as the tag the live export wrote. The graph
+    # keeps its tuple (#1173): `data` is the serializer's copy.
+    #
+    # - **The exporter's own test** (`entities._one_tag_of`, which
+    #   `io_handlers._one_tag` asks), so the two cannot disagree.
+    # - **The shape first**, then the dictionary: an exact 2-tuple is
+    #   rare, and a dictionary lookup per attribute of every save is not.
+    # - **Standard tags only.** A private tag recorded `AT` keeps its
+    #   list (owner ruling Q5b: filed separately). A list is never
+    #   touched: `[24, 4195]` is how two group-0000 tags are spelled
+    #   (owner ruling Q4).
+    for tag, value in data.items():
+        if type(value) is not tuple or len(value) != 2 \
+                or _is_private_tag(tag):
+            continue
+        try:
+            group, element = (int(part, 16) for part in tag.split(","))
+            if dictionary_VR((group << 16) | element) != "AT":
+                continue
+        except (KeyError, ValueError, AttributeError):
+            continue
+        one = _one_tag_of(value)
+        if one is not None:
+            data[tag] = one
 
 
 def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
@@ -3252,6 +3291,7 @@ class SqliteStore:
             Dict[str, Any]: A new dict; the item is not modified.
         """
         data = item.attributes.copy()
+        _pairs_as_the_tags_they_name(data)
         # The root `__vrs__` holds exactly the recorded VRs of the private
         # tags whose value is `bytes`: the set
         # `_split_core_and_private` keeps here in `attributes_json`, where
@@ -3332,6 +3372,7 @@ class SqliteStore:
         # `value_rep`, and a second copy could disagree with it after a
         # partial write.
         data = item.attributes.copy()
+        _pairs_as_the_tags_they_name(data)
         if getattr(item, "attribute_vrs", None):
             data['__vrs__'] = dict(item.attribute_vrs)
         # The per-value date record, the same way. A nested date is the

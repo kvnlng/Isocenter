@@ -598,8 +598,9 @@ def number_vr_on_a_date_or_time(out: Path):
     `DSfloat`, numbers that carry the file's own text, and the exporter
     writes them under the dictionary's DA, TM and DT from that text
     (review of #1009: a gate on "a number under a text VR" lost all
-    three). No other input states a VR that disagrees with the
-    dictionary for a standard tag."""
+    three). `binary_number_vr_on_a_text_tag`, `number_vr_on_a_text_tag`
+    and `text_or_number_vr_on_a_binary_or_numeric_tag` also state a VR
+    that disagrees with the dictionary for a standard tag."""
     ds = ct("number_vr_on_a_date_or_time")
     for tag, vr, text in ((0x00143076, "IS", "20230101"),
                           (0x00143077, "DS", "120000.5"),
@@ -616,15 +617,64 @@ def binary_number_vr_on_a_text_tag(out: Path):
     pydicom reads each as a plain `int` or `float`, which nothing in the
     graph tells from a caller's number, so the exporter's text gate drops
     each under a `DATA_LOSS` row and writes the rest of the file (#939;
-    owner ruling of 2026-10-09 on the delta review of #1009; #1017).
-    Before the gate the whole file failed. The sibling of
-    `number_vr_on_a_date_or_time`, whose `IS` and `DS` values are
-    pydicom's own classes and are written."""
+    owner ruling of 2026-10-09 on the delta review of #1009). Before the
+    gate the whole file failed. The sibling of
+    `number_vr_on_a_date_or_time` and `number_vr_on_a_text_tag`, whose
+    `IS` and `DS` values are pydicom's own classes and are written as
+    the file's text."""
     ds = ct("binary_number_vr_on_a_text_tag")
     for tag, vr, value in ((0x00081090, "US", 42), (0x00185100, "SS", -3),
                            (0x00080070, "FD", 4.5)):
         ds[tag] = pydicom.DataElement(tag, vr, value)
     write(ds, out / "binary_number_vr_on_a_text_tag-1.dcm")
+
+
+def number_vr_on_a_text_tag(out: Path):
+    """Six text tags the file wrote under IS or DS: Radiopharmaceutical
+    `(0018,0031)`, an LO, under `IS`; Filter Type `(0018,1160)`, an SH,
+    under `DS`; MR Acquisition Type `(0018,0023)`, a CS, under `IS`;
+    Patient's Age `(0010,1010)`, an AS, under `IS`; Secondary Reviewer
+    Name `(0014,0104)`, a PN, under `IS`; Referenced Color Palette
+    Instance UID `(0028,0304)`, a UI, under `DS`. No row of Table E.1-1
+    names five of them, and both configurations KEEP Patient's Age.
+    pydicom reads each as an `IS` or a `DSfloat` carrying the file's own
+    text, which the exporter writes under the dictionary's VR (#1017,
+    owner ruling Q3 of 2026-11-22). Before X5 the LO, SH, CS and AS each
+    failed the whole file (`object of type 'IS' has no len()`), and the
+    PN and UI were lost in pydicom's words. The sibling of
+    `number_vr_on_a_date_or_time`."""
+    ds = ct("number_vr_on_a_text_tag")
+    for tag, vr, text in ((0x00180031, "IS", "7"),
+                          (0x00181160, "DS", "1.5"),
+                          (0x00180023, "IS", "3"),
+                          (0x00101010, "IS", "42"),
+                          (0x00140104, "IS", "7"),
+                          (0x00280304, "DS", "1.5")):
+        ds[tag] = pydicom.DataElement(tag, vr, text)
+    write(ds, out / "number_vr_on_a_text_tag-1.dcm")
+
+
+def text_or_number_vr_on_a_binary_or_numeric_tag(out: Path):
+    """Four tags the file wrote under a VR that cannot hold what the
+    dictionary's VR holds: Tag Angle Second Axis `(0018,9219)`, an SS,
+    under `LO` ("5"); Diffusion b-value `(0018,9087)`, an FD, under `LO`
+    ("abc"); Vector Grid Data `(0064,0009)`, an OF, under
+    `US` (7); Frame Increment Pointer `(0028,0009)`, an AT, under `FD`
+    (1.5). No row of Table E.1-1 names any of the four. (Encapsulated
+    Document `(0042,0011)`, where the X5 brief measured an OB stated as
+    `US`, is a REPLACE row of basic@2026c, so its source value never
+    reaches an export here.) Before X5 the first three each failed the
+    whole file, and the AT was written as the tag `(0000,0001)` with no
+    row. Each now loses its one element under a STANDARD `DATA_LOSS` row
+    and the file is written (#986, #1018, #1026). Writing the text `5`
+    as the number 5 is not done."""
+    ds = ct("text_or_number_vr_on_a_binary_or_numeric_tag")
+    for tag, vr, value in ((0x00189219, "LO", "5"),
+                           (0x00189087, "LO", "abc"),
+                           (0x00640009, "US", 7),
+                           (0x00280009, "FD", 1.5)):
+        ds[tag] = pydicom.DataElement(tag, vr, value)
+    write(ds, out / "text_or_number_vr_on_a_binary_or_numeric_tag-1.dcm")
 
 
 def source_says_unmodified(out: Path):
@@ -1273,7 +1323,8 @@ MEMBERS = {f.__name__: f for f in (
     offset_table_edges, fewer_fragments_than_frames,
     no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary,
     no_planar_configuration, structured_report, private_creators,
-    declared_planar_configuration)}
+    declared_planar_configuration, number_vr_on_a_text_tag,
+    text_or_number_vr_on_a_binary_or_numeric_tag)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
