@@ -16,6 +16,11 @@ row, and `Instance.get_pixel_data()` on the source file refuses in the
 count's words (owner ruling 2026-11-22, Q2 and Q3: every marker-delimited
 syntax, a test per syntax).
 
+A NumberOfFrames pydicom refuses (negative) is not counted: the count
+overrides the element for the decode, so counting it would admit a file
+pydicom refuses, and a signed JPEG 2000 codestream under it was decoded
+with its samples shifted (review of X7, finding 1).
+
 A frame split across fragments is still one frame: its first fragment
 has no end marker and its later fragments no start marker, and the
 count asks both of every fragment.
@@ -111,6 +116,22 @@ def test_ingest_keeps_frame_0_with_a_row_under_every_syntax(tmp_path, ts,
     want = _frame_0_alone(tmp_path, ts)
     assert want.shape == (4, 4)
     assert result[2] == np.ascontiguousarray(want).tobytes()
+
+
+@pytest.mark.parametrize("ts", ["1.2.840.10008.1.2.4.90",
+                                "1.2.840.10008.1.2.4.50"])
+def test_a_number_of_frames_pydicom_refuses_is_not_counted(tmp_path, ts):
+    """Red if the count stands in for a NumberOfFrames pydicom refuses.
+
+    The file is refused in pydicom's sentence naming the element, as it
+    was before the count existed, never ingested with frame 0.
+    """
+    path = write(tmp_path, _file(ts, _streams(ts), -1))
+
+    assert offset_table_frame_count(pydicom.dcmread(path)) is None
+    assert ingest_worker(path)[-1] == (
+        "Decompression Failed: ValueError: A (0028,0008) 'Number of Frames' "
+        "value of '-1' is invalid, it must be greater than or equal to 1")
 
 
 def test_a_session_ingest_writes_the_data_loss_row(tmp_path):

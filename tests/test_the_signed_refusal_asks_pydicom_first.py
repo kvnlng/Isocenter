@@ -16,10 +16,25 @@ runner, or no `_validate_options`), it refuses in the signed sentence
 all the same -- failing closed, because withholding there would hand
 the file to Pillow (owner ruling 2026-11-22, Q6).
 
+A count that overrides NumberOfFrames for the decode cannot make that
+verdict wrong (review of X7, finding 1): two whole signed codestreams
+under NumberOfFrames -1 were refused by the verdict, so the signed
+sentence was withheld, and then counted one frame per fragment
+(`_whole_stream_fragments`, #1088), whose `number_of_frames` overrode
+the element pydicom refused, so Pillow decoded the samples shifted by
+2**15 and ingest stored them. The whole-stream count now declines a
+NumberOfFrames pydicom refuses, and the decode raises pydicom's sentence
+naming it.
+
 Names `isocenter.imagecodecs_handler` and `isocenter.io_handlers`.
 """
+import os
+from io import BytesIO
+
+import numpy as np
 import pydicom
 import pytest
+from pydicom.encaps import encapsulate, generate_fragments, parse_basic_offsets
 from pydicom.pixels.decoders.base import DecodeRunner
 
 from isocenter import imagecodecs_handler
@@ -30,6 +45,7 @@ from isocenter.io_handlers import _decode_pixels, ingest_worker
 from support.decode_doors import through_the_fallback
 from test_j2k_signedness_against_pixel_representation import (SIGNED_16,
                                                               _dataset,
+                                                              _ingest,
                                                               _write)
 
 SIGNED = "codestream is signed"
@@ -160,3 +176,50 @@ def test_the_fallback_route_gives_pydicoms_sentence_too(edit, kind, holds):
         through_the_fallback(ds)
     assert holds in str(caught.value), caught.value
     assert SIGNED not in str(caught.value)
+
+
+def _two_whole_signed_codestreams(number_of_frames):
+    """The signed file's codestream twice, one per fragment, no offset table."""
+    ds = _signed()
+    buf = BytesIO(ds.PixelData)
+    parse_basic_offsets(buf)
+    stream = bytes(next(generate_fragments(buf)))
+    ds.PixelData = encapsulate([stream, stream], has_bot=False)
+    ds["PixelData"].is_undefined_length = True
+    if number_of_frames is None:
+        if "NumberOfFrames" in ds:
+            del ds.NumberOfFrames
+    else:
+        ds.NumberOfFrames = number_of_frames
+    return ds
+
+
+NUMBER_OF_FRAMES = "(0028,0008) 'Number of Frames' value of '-1' is invalid"
+
+
+@pytest.mark.parametrize("number_of_frames", [None, 1, 0, -1],
+                         ids=["absent", "1", "0", "-1"])
+def test_two_whole_signed_codestreams_are_never_stored(tmp_path,
+                                                       number_of_frames):
+    """Red if a count's `number_of_frames` overrides the element pydicom refused.
+
+    The outcome, whatever NumberOfFrames holds: the file is not ingested,
+    and nothing is stored shifted by 2**15. Under -1, pydicom refuses the
+    header, and its sentence naming the element is the one given (Q6).
+    """
+    path = _write(tmp_path, _two_whole_signed_codestreams(number_of_frames))
+
+    row = ingest_worker(path)[-1]
+
+    assert row is not None, "a signed codestream under PR 0 was decoded"
+    if number_of_frames == -1:
+        assert row == f"Decompression Failed: ValueError: {NUMBER_OF_FRAMES}" \
+            ", it must be greater than or equal to 1", row
+    else:
+        assert SIGNED in row, row
+    summary, stored = _ingest(tmp_path, os.path.dirname(path))
+    shifted = (SIGNED_16.astype(np.int32) + 2 ** 15).astype(np.uint16)
+    assert stored is None or not np.array_equal(stored, shifted), (
+        "signed samples stored shifted by 2**15")
+    assert summary.ingested == 0
+
